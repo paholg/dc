@@ -1,6 +1,14 @@
-use std::path::PathBuf;
+use std::os::unix::process::CommandExt;
+use std::path::{Path, PathBuf};
 
 use clap::Args;
+use eyre::eyre;
+use serde_json::json;
+
+use crate::config::Config;
+use crate::devcontainer::{Common, Compose, DevContainer};
+use crate::runner;
+use crate::worktree;
 
 /// Spin up a devcontainer
 #[derive(Debug, Args)]
@@ -8,7 +16,7 @@ pub struct Up {
     #[arg(
         short,
         long,
-        help = "name of project; leave blank to use your default one"
+        help = "name of project [default: The first one configured]"
     )]
     project: Option<String>,
 
@@ -30,7 +38,242 @@ pub struct Up {
 }
 
 impl Up {
-    pub fn run(self) -> eyre::Result<()> {
+    pub fn run(self, config: &Config) -> eyre::Result<()> {
+        let (name, project) = config.project(self.project.as_deref())?;
+
+        let ws_name = self
+            .name
+            .map(|p| p.to_string_lossy().into_owned())
+            .unwrap_or_else(|| worktree::generate_name(name));
+
+        let worktree_path = worktree::create(&project.path, &project.workspace_dir, &ws_name)?;
+
+        let dc = DevContainer::load(&worktree_path)?;
+
+        let crate::devcontainer::Kind::Compose(ref compose) = dc.kind else {
+            // This was handled at deserialize time already.
+            panic!();
+        };
+
+        // initializeCommand runs on the host, from the worktree
+        if let Some(ref cmd) = dc.common.initialize_command {
+            runner::run("initializeCommand", cmd, Some(&worktree_path))?;
+        }
+
+        let config_file = worktree_path
+            .join(".devcontainer")
+            .join("devcontainer.json");
+        let override_file =
+            write_compose_override(compose, &dc.common, &worktree_path, &config_file)?;
+
+        compose_up(compose, &worktree_path, &override_file)?;
+
+        let container_id = compose_ps_q(compose, &worktree_path, &override_file)?;
+        let user = dc.common.remote_user.as_deref();
+        let workdir = Some(compose.workspace_folder.as_path());
+        let remote_env = &dc.common.remote_env;
+
+        // Lifecycle commands in the container
+        if let Some(ref cmd) = dc.common.on_create_command {
+            cmd.run_in_container("onCreateCommand", &container_id, user, workdir, remote_env)?;
+        }
+        if let Some(ref cmd) = dc.common.update_content_command {
+            cmd.run_in_container(
+                "updateContentCommand",
+                &container_id,
+                user,
+                workdir,
+                remote_env,
+            )?;
+        }
+        if let Some(ref cmd) = dc.common.post_create_command {
+            cmd.run_in_container(
+                "postCreateCommand",
+                &container_id,
+                user,
+                workdir,
+                remote_env,
+            )?;
+        }
+        if let Some(ref cmd) = dc.common.post_start_command {
+            cmd.run_in_container("postStartCommand", &container_id, user, workdir, remote_env)?;
+        }
+
+        // Interactive exec if requested
+        if let Some(cmd_args) = self.exec {
+            exec_interactive(&container_id, user, workdir, &cmd_args, config)?;
+        }
+
         Ok(())
     }
+}
+
+/// Match the devcontainer CLI convention: `{basename}_devcontainer`, lowercased,
+/// keeping only `[a-z0-9-_]`.
+fn compose_project_name(worktree_path: &Path) -> String {
+    let basename = worktree_path
+        .file_name()
+        .unwrap_or_default()
+        .to_string_lossy();
+    let raw = format!("dc-{basename}");
+    raw.to_lowercase()
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
+        .collect()
+}
+
+/// Generate a compose override file that injects devcontainer labels onto the
+/// primary service so that VS Code and other tools can discover the container.
+fn write_compose_override(
+    compose: &Compose,
+    common: &Common,
+    worktree_path: &Path,
+    config_file: &Path,
+) -> eyre::Result<PathBuf> {
+    let override_path = std::env::temp_dir()
+        .join(format!("{}-override.yml", compose_project_name(worktree_path)));
+    let local_folder = worktree_path.to_string_lossy();
+    let config_file = config_file.to_string_lossy();
+
+    let mut service_obj = json!({
+        "labels": [
+            format!("devcontainer.local_folder={local_folder}"),
+            format!("devcontainer.config_file={config_file}"),
+        ]
+    });
+
+    if !common.container_env.is_empty() {
+        service_obj["environment"] = json!(common.container_env);
+    }
+
+    if let Some(init) = common.init {
+        service_obj["init"] = json!(init);
+    }
+    if let Some(privileged) = common.privileged {
+        service_obj["privileged"] = json!(privileged);
+    }
+    if !common.cap_add.is_empty() {
+        service_obj["cap_add"] = json!(common.cap_add);
+    }
+    if !common.security_opt.is_empty() {
+        service_obj["security_opt"] = json!(common.security_opt);
+    }
+    if let Some(ref user) = common.container_user {
+        service_obj["user"] = json!(user);
+    }
+
+    if compose.override_command {
+        service_obj["entrypoint"] = json!([
+            "/bin/sh",
+            "-c",
+            r#"echo Container started
+ trap "exit 0" 15
+
+ exec "$@"
+ while sleep 1 & wait $!; do :; done"#,
+            "-"
+        ]);
+        service_obj["command"] = json!([]);
+    }
+
+    let content = serde_json::to_string_pretty(&json!({
+        "services": { &compose.service: service_obj }
+    }))?;
+
+    std::fs::write(&override_path, content)?;
+    Ok(override_path)
+}
+
+fn compose_base_args(compose: &Compose, worktree_path: &Path, override_file: &Path) -> Vec<String> {
+    let mut args = vec![
+        "compose".into(),
+        "-p".into(),
+        compose_project_name(worktree_path),
+    ];
+    for f in &compose.docker_compose_file {
+        args.push("-f".into());
+        args.push(
+            worktree_path
+                .join(".devcontainer")
+                .join(f)
+                .to_string_lossy()
+                .into_owned(),
+        );
+    }
+    args.push("-f".into());
+    args.push(override_file.to_string_lossy().into_owned());
+    args
+}
+
+fn compose_up(compose: &Compose, worktree_path: &Path, override_file: &Path) -> eyre::Result<()> {
+    let mut args = vec1::vec1!["docker".into()];
+    args.extend(compose_base_args(compose, worktree_path, override_file));
+    args.extend(["up".into(), "-d".into(), "--build".into()]);
+
+    if let Some(ref services) = compose.run_services {
+        let mut to_start: Vec<String> = services.clone();
+        if !to_start.contains(&compose.service) {
+            to_start.push(compose.service.clone());
+        }
+        args.extend(to_start);
+    }
+
+    let cmd = crate::runner::cmd::Cmd::Args(args);
+    runner::run("docker compose up", &cmd, None)
+}
+
+fn compose_ps_q(
+    compose: &Compose,
+    worktree_path: &Path,
+    override_file: &Path,
+) -> eyre::Result<String> {
+    let mut args = compose_base_args(compose, worktree_path, override_file);
+    args.extend(["ps".into(), "-q".into(), compose.service.clone()]);
+
+    let output = duct::cmd("docker", &args).read()?;
+    let id = output.lines().next().unwrap_or("").trim().to_string();
+    if id.is_empty() {
+        return Err(eyre!(
+            "no container found for service '{}'",
+            compose.service
+        ));
+    }
+    Ok(id)
+}
+
+fn exec_interactive(
+    container_id: &str,
+    user: Option<&str>,
+    workdir: Option<&Path>,
+    cmd_args: &[String],
+    config: &Config,
+) -> eyre::Result<()> {
+    let mut args = vec!["exec".to_string(), "-it".into()];
+    if let Some(u) = user {
+        args.extend(["-u".into(), u.to_string()]);
+    }
+    if let Some(w) = workdir {
+        args.extend(["-w".into(), w.to_string_lossy().into_owned()]);
+    }
+    args.push(container_id.to_string());
+
+    if cmd_args.is_empty() {
+        match &config.default_cmd {
+            Some(crate::runner::cmd::Cmd::Shell(s)) => {
+                args.extend(["sh".into(), "-c".into(), s.clone()]);
+            }
+            Some(crate::runner::cmd::Cmd::Args(a)) if !a.is_empty() => {
+                args.extend(a.iter().cloned());
+            }
+            _ => args.push("sh".into()),
+        }
+    } else {
+        args.extend(cmd_args.iter().cloned());
+    }
+
+    // Restore cursor visibility — indicatif hides it for spinners and exec()
+    // replaces the process before indicatif's cleanup can run.
+    let _ = crossterm::execute!(std::io::stdout(), crossterm::cursor::Show);
+
+    Err(std::process::Command::new("docker").args(&args).exec().into())
 }

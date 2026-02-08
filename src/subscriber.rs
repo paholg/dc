@@ -13,7 +13,7 @@ use tracing_subscriber::layer::{Context, Layer, SubscriberExt};
 use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::util::SubscriberInitExt;
 
-use crate::ansi::{GRAY, GREEN, MAGENTA, RESET};
+use crate::ansi::{BLUE, GRAY, GREEN, MAGENTA, RED, RESET, YELLOW};
 
 fn ts(time: &Zoned) -> String {
     time.strftime("%F %T").to_string()
@@ -55,9 +55,10 @@ impl<S: Subscriber + for<'a> LookupSpan<'a>> Layer<S> for DcLayer {
         attrs.record(&mut visitor);
 
         if attrs.metadata().name() == "parallel"
-            && let Some(ref label) = visitor.label {
-                span.extensions_mut().insert(ParallelLabel(label.clone()));
-            }
+            && let Some(ref label) = visitor.label
+        {
+            span.extensions_mut().insert(ParallelLabel(label.clone()));
+        }
 
         span.extensions_mut().insert(SpanTiming {
             label: visitor.label,
@@ -124,12 +125,39 @@ impl<S: Subscriber + for<'a> LookupSpan<'a>> Layer<S> for DcLayer {
                 .find_map(|s| s.extensions().get::<ParallelLabel>().map(|l| l.0.clone()))
         });
 
-        let mut stdout = self.stdout_writer.clone();
-        if let Some(label) = &label {
-            let _ = writeln!(stdout, "[{label}] {msg}");
-        } else {
-            let _ = writeln!(stdout, "{msg}");
+        let level = *event.metadata().level();
+
+        // We use TRACE logs as just forwarding output, and want to print them _almost_ undecorated.
+        // The caveat is tha when they're run as part of parallel commands, they'll be interleaved,
+        // so we want to show the source.
+        if level == tracing::Level::TRACE {
+            let mut stdout = self.stdout_writer.clone();
+            if let Some(label) = &label {
+                let _ = writeln!(stdout, "[{label}] {msg}");
+            } else {
+                let _ = writeln!(stdout, "{msg}");
+            }
+            let _ = stdout.flush();
+            return;
         }
+
+        let ts = ts(&Zoned::now());
+        let level_color = match level {
+            tracing::Level::ERROR => RED,
+            tracing::Level::WARN => YELLOW,
+            tracing::Level::INFO => GREEN,
+            tracing::Level::DEBUG => BLUE,
+            tracing::Level::TRACE => unreachable!(),
+        };
+
+        let mut line = format!("{GRAY}{ts}{RESET} {level_color}{level:>5}{RESET}");
+        if let Some(label) = &label {
+            line.push_str(&format!(" [{MAGENTA}{label}{RESET}]"));
+        }
+        line.push_str(&format!(" {msg}"));
+
+        let mut stdout = self.stdout_writer.clone();
+        let _ = writeln!(stdout, "{line}");
         let _ = stdout.flush();
     }
 }

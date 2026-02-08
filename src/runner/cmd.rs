@@ -1,29 +1,23 @@
 use std::borrow::Cow;
-use std::io::{BufRead, BufReader};
+use std::path::Path;
 
-use duct::Expression;
 use serde::{Deserialize, Serialize};
+use vec1::Vec1;
 
 use crate::runner::Runnable;
 
-#[derive(Debug, Deserialize, Serialize, Default, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 #[serde(untagged)]
 pub enum Cmd {
-    #[default]
-    None,
     Shell(String),
-    Args(Vec<String>),
+    Args(Vec1<String>),
 }
 
 impl Cmd {
-    fn as_expression(&self) -> Option<Expression> {
+    pub fn as_args(&self) -> Vec<&str> {
         match self {
-            Cmd::None => None,
-            Cmd::Shell(prog) => Some(duct_sh::sh_dangerous(prog)),
-            Cmd::Args(args) => {
-                let (prog, rest) = args.split_first()?;
-                Some(duct::cmd(prog, rest))
-            }
+            Cmd::Shell(prog) => vec!["/bin/sh", "-c", prog],
+            Cmd::Args(args) => args.iter().map(|s| s.as_str()).collect(),
         }
     }
 }
@@ -31,23 +25,13 @@ impl Cmd {
 impl Runnable for Cmd {
     fn command(&self) -> Cow<'_, str> {
         match self {
-            Cmd::None => "".into(),
             Cmd::Shell(prog) => prog.into(),
             Cmd::Args(args) => args.join(" ").into(),
         }
     }
 
-    fn run(&self) -> eyre::Result<()> {
-        let Some(expression) = self.as_expression() else {
-            return Ok(());
-        };
-
-        let handle = expression.stderr_to_stdout().reader()?;
-        for line in BufReader::new(handle).lines() {
-            let line = line?;
-            tracing::info!("{line}");
-        }
-
-        Ok(())
+    fn run(&self, dir: Option<&Path>) -> eyre::Result<()> {
+        let argv = self.as_args();
+        super::pty::run_in_pty(&argv, dir)
     }
 }

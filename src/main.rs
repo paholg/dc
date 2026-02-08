@@ -2,7 +2,11 @@
 
 use clap::Parser;
 use color_eyre::config::HookBuilder;
-use dc::{self, cli::Cli};
+use dc::{
+    self,
+    cli::{Cli, Commands},
+    config::Config,
+};
 
 fn main() -> eyre::Result<()> {
     HookBuilder::default()
@@ -12,6 +16,11 @@ fn main() -> eyre::Result<()> {
     dc::subscriber::init_subscriber();
 
     let cli = Cli::parse();
-    println!("{cli:?}");
+    dc::preflight::check()?;
+    let config = Config::load()?;
+    match cli.command {
+        Commands::Up(up) => up.run(&config)?,
+        _ => todo!("{cli:?}"),
+    }
     Ok(())
 }

@@ -9,6 +9,7 @@ use tracing::{Event, Id, Subscriber};
 use tracing_indicatif::IndicatifLayer;
 use tracing_indicatif::filter::IndicatifFilter;
 use tracing_indicatif::writer::{IndicatifWriter, Stdout};
+use tracing_subscriber::filter::filter_fn;
 use tracing_subscriber::layer::{Context, Layer, SubscriberExt};
 use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::util::SubscriberInitExt;
@@ -27,7 +28,9 @@ pub fn init_subscriber() {
     let stdout_writer = indicatif_layer.get_stdout_writer();
     let indicatif_layer = indicatif_layer.with_filter(IndicatifFilter::new(false));
 
-    let dc_layer = DcLayer { stdout_writer };
+    let dc_layer = DcLayer { stdout_writer }.with_filter(filter_fn(|meta| {
+        *meta.level() > tracing::Level::TRACE || meta.target().starts_with("dc")
+    }));
 
     tracing_subscriber::registry()
         .with(dc_layer)

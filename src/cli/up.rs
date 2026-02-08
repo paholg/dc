@@ -46,7 +46,7 @@ impl Up {
             .map(|p| p.to_string_lossy().into_owned())
             .unwrap_or_else(|| worktree::generate_name(name));
 
-        let worktree_path = worktree::create(&project.path, &project.workspace_dir, &ws_name)?;
+        let worktree_path = worktree::create(&project.path, &project.workspace_dir, &ws_name).await?;
 
         let dc = DevContainer::load(&worktree_path)?;
 
@@ -68,7 +68,7 @@ impl Up {
 
         compose_up(compose, &worktree_path, &override_file).await?;
 
-        let container_id = compose_ps_q(compose, &worktree_path, &override_file)?;
+        let container_id = compose_ps_q(compose, &worktree_path, &override_file).await?;
         let user = dc.common.remote_user.as_deref();
         let workdir = Some(compose.workspace_folder.as_path());
         let remote_env = &dc.common.remote_env;
@@ -227,7 +227,7 @@ async fn compose_up(compose: &Compose, worktree_path: &Path, override_file: &Pat
     runner::run("docker compose up", &cmd, None).await
 }
 
-fn compose_ps_q(
+async fn compose_ps_q(
     compose: &Compose,
     worktree_path: &Path,
     override_file: &Path,
@@ -235,7 +235,12 @@ fn compose_ps_q(
     let mut args = compose_base_args(compose, worktree_path, override_file);
     args.extend(["ps".into(), "-q".into(), compose.service.clone()]);
 
-    let output = duct::cmd("docker", &args).read()?;
+    let out = tokio::process::Command::new("docker")
+        .args(&args)
+        .output()
+        .await?;
+    eyre::ensure!(out.status.success(), "docker compose ps failed");
+    let output = String::from_utf8(out.stdout)?;
     let id = output.lines().next().unwrap_or("").trim().to_string();
     if id.is_empty() {
         return Err(eyre!(

@@ -1,30 +1,42 @@
-use eyre::bail;
+use std::process::Stdio;
 
-pub fn check() -> eyre::Result<()> {
-    if duct::cmd!("docker", "version", "--format", "{{.Client.Version}}")
-        .stderr_null()
-        .read()
-        .is_err()
+use eyre::bail;
+use tokio::process::Command;
+
+pub async fn check() -> eyre::Result<()> {
+    if Command::new("docker")
+        .args(["version", "--format", "{{.Client.Version}}"])
+        .stderr(Stdio::null())
+        .stdout(Stdio::null())
+        .status()
+        .await
+        .map_or(true, |s| !s.success())
     {
         bail!(
             "docker is not installed or the daemon is not running.\nInstall Docker: https://docs.docker.com/get-docker/"
         );
     }
 
-    if duct::cmd!("docker", "compose", "version", "--short")
-        .stderr_null()
-        .read()
-        .is_err()
+    if Command::new("docker")
+        .args(["compose", "version", "--short"])
+        .stderr(Stdio::null())
+        .stdout(Stdio::null())
+        .status()
+        .await
+        .map_or(true, |s| !s.success())
     {
         bail!(
             "docker compose (v2) is not available.\nInstall the Compose plugin: https://docs.docker.com/compose/install/"
         );
     }
 
-    if duct::cmd!("docker", "buildx", "version")
-        .stderr_null()
-        .read()
-        .is_err()
+    if Command::new("docker")
+        .args(["buildx", "version"])
+        .stderr(Stdio::null())
+        .stdout(Stdio::null())
+        .status()
+        .await
+        .map_or(true, |s| !s.success())
     {
         bail!(
             "docker buildx is not available.\nInstall the Buildx plugin: https://docs.docker.com/build/install-buildx/"

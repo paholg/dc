@@ -3,6 +3,7 @@ use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
 
 use clap::Args;
+use tokio::process::Command;
 use tracing::warn;
 
 use crate::config::Config;
@@ -25,13 +26,13 @@ impl Prune {
     pub async fn run(self, config: &Config) -> eyre::Result<()> {
         let (_, project) = config.project(self.project.as_deref())?;
 
-        let worktrees = list_worktrees(&project.path, &project.workspace_dir)?;
+        let worktrees = list_worktrees(&project.path, &project.workspace_dir).await?;
         if worktrees.is_empty() {
             println!("Nothing to prune.");
             return Ok(());
         }
 
-        let workspaces = Workspace::list_project(self.project.as_deref(), config)?;
+        let workspaces = Workspace::list_project(self.project.as_deref(), config).await?;
         let ws_map: HashMap<&Path, &Workspace> = workspaces
             .iter()
             .map(|ws| (ws.path.as_path(), ws))
@@ -89,17 +90,21 @@ impl Prune {
 
         for path in &to_clean {
             let compose_name = super::up::compose_project_name(path);
-            cleanup(&project.path, path, &compose_name)?;
+            cleanup(&project.path, path, &compose_name).await?;
         }
 
         Ok(())
     }
 }
 
-fn list_worktrees(repo_path: &Path, workspace_dir: &Path) -> eyre::Result<Vec<PathBuf>> {
-    let output = duct::cmd!("git", "worktree", "list", "--porcelain")
-        .dir(repo_path)
-        .read()?;
+async fn list_worktrees(repo_path: &Path, workspace_dir: &Path) -> eyre::Result<Vec<PathBuf>> {
+    let out = Command::new("git")
+        .args(["worktree", "list", "--porcelain"])
+        .current_dir(repo_path)
+        .output()
+        .await?;
+    eyre::ensure!(out.status.success(), "git worktree list failed");
+    let output = String::from_utf8(out.stdout)?;
 
     let workspace_dir = workspace_dir.canonicalize().unwrap_or(workspace_dir.into());
     let mut worktrees = Vec::new();
@@ -117,18 +122,11 @@ fn list_worktrees(repo_path: &Path, workspace_dir: &Path) -> eyre::Result<Vec<Pa
     Ok(worktrees)
 }
 
-fn cleanup(repo_path: &Path, path: &Path, compose_name: &str) -> eyre::Result<()> {
-    let down_result = duct::cmd!(
-        "docker",
-        "compose",
-        "-p",
-        compose_name,
-        "down",
-        "-v",
-        "--remove-orphans"
-    )
-    .unchecked()
-    .run();
+async fn cleanup(repo_path: &Path, path: &Path, compose_name: &str) -> eyre::Result<()> {
+    let down_result = Command::new("docker")
+        .args(["compose", "-p", compose_name, "down", "-v", "--remove-orphans"])
+        .status()
+        .await;
 
     if let Err(e) = down_result {
         warn!("docker compose down failed for {}: {e}", path.display());
@@ -147,7 +145,12 @@ fn cleanup(repo_path: &Path, path: &Path, compose_name: &str) -> eyre::Result<()
     let path_str = path.to_string_lossy();
     args.push(&path_str);
 
-    duct::cmd("git", &args).dir(repo_path).run()?;
+    let status = Command::new("git")
+        .args(&args)
+        .current_dir(repo_path)
+        .status()
+        .await?;
+    eyre::ensure!(status.success(), "git worktree remove failed");
 
     println!("Removed {}", path.display());
     Ok(())

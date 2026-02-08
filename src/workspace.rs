@@ -4,6 +4,7 @@ use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
+use tokio::process::Command;
 use tracing::warn;
 
 use crate::cli::up::compose_project_name;
@@ -140,28 +141,29 @@ struct ContainerInfo {
 }
 
 impl Workspace {
-    pub fn list_all(config: &Config) -> eyre::Result<Vec<Workspace>> {
-        list_with_filter(&["--filter", "label=dev.dc.managed=true"], None, config)
+    pub async fn list_all(config: &Config) -> eyre::Result<Vec<Workspace>> {
+        list_with_filter(&["--filter", "label=dev.dc.managed=true"], None, config).await
     }
 
-    pub fn list_project(project: Option<&str>, config: &Config) -> eyre::Result<Vec<Workspace>> {
+    pub async fn list_project(project: Option<&str>, config: &Config) -> eyre::Result<Vec<Workspace>> {
         match project {
             Some(name) => {
                 let filter = format!("label=dev.dc.project={name}");
-                list_with_filter(&["--filter", &filter], Some(name), config)
+                list_with_filter(&["--filter", &filter], Some(name), config).await
             }
-            None => Self::list_all(config),
+            None => Self::list_all(config).await,
         }
     }
 }
 
 // Phase 1: Docker discovery
-fn docker_ps(extra_filters: &[&str]) -> eyre::Result<Vec<ContainerInfo>> {
+async fn docker_ps(extra_filters: &[&str]) -> eyre::Result<Vec<ContainerInfo>> {
     let mut args = vec!["ps", "-a"];
     args.extend_from_slice(extra_filters);
     args.extend_from_slice(&["--format", "json"]);
 
-    let output = duct::cmd("docker", &args).unchecked().read()?;
+    let out = Command::new("docker").args(&args).output().await?;
+    let output = String::from_utf8(out.stdout)?;
     let mut containers = Vec::new();
 
     for line in output.lines() {
@@ -195,10 +197,14 @@ fn docker_ps(extra_filters: &[&str]) -> eyre::Result<Vec<ContainerInfo>> {
 }
 
 // Phase 2: Git worktree discovery
-fn git_worktrees(repo_path: &Path, workspace_dir: &Path) -> eyre::Result<Vec<PathBuf>> {
-    let output = duct::cmd!("git", "worktree", "list", "--porcelain")
-        .dir(repo_path)
-        .read()?;
+async fn git_worktrees(repo_path: &Path, workspace_dir: &Path) -> eyre::Result<Vec<PathBuf>> {
+    let out = Command::new("git")
+        .args(["worktree", "list", "--porcelain"])
+        .current_dir(repo_path)
+        .output()
+        .await?;
+    eyre::ensure!(out.status.success(), "git worktree list failed");
+    let output = String::from_utf8(out.stdout)?;
 
     let workspace_dir = workspace_dir.canonicalize().unwrap_or(workspace_dir.into());
     let mut worktrees = Vec::new();
@@ -217,7 +223,7 @@ fn git_worktrees(repo_path: &Path, workspace_dir: &Path) -> eyre::Result<Vec<Pat
 }
 
 // Phase 3a: docker stats (one command for all running containers)
-fn docker_stats(container_ids: &[String]) -> HashMap<String, Stats> {
+async fn docker_stats(container_ids: &[String]) -> HashMap<String, Stats> {
     if container_ids.is_empty() {
         return HashMap::new();
     }
@@ -230,8 +236,11 @@ fn docker_stats(container_ids: &[String]) -> HashMap<String, Stats> {
     ];
     args.extend(container_ids.iter().cloned());
 
-    let output = match duct::cmd("docker", &args).unchecked().read() {
-        Ok(o) => o,
+    let output = match Command::new("docker").args(&args).output().await {
+        Ok(o) => match String::from_utf8(o.stdout) {
+            Ok(s) => s,
+            Err(_) => return HashMap::new(),
+        },
         Err(_) => return HashMap::new(),
     };
 
@@ -255,7 +264,7 @@ fn docker_stats(container_ids: &[String]) -> HashMap<String, Stats> {
 }
 
 // Phase 3b: exec-session detection (batched)
-fn detect_execs(container_ids: &[String]) -> HashMap<String, Vec<ExecSession>> {
+async fn detect_execs(container_ids: &[String]) -> HashMap<String, Vec<ExecSession>> {
     let mut result: HashMap<String, Vec<ExecSession>> = HashMap::new();
     if container_ids.is_empty() {
         return result;
@@ -269,8 +278,11 @@ fn detect_execs(container_ids: &[String]) -> HashMap<String, Vec<ExecSession>> {
     ];
     args.extend(container_ids.iter().cloned());
 
-    let output = match duct::cmd("docker", &args).unchecked().read() {
-        Ok(o) => o,
+    let output = match Command::new("docker").args(&args).output().await {
+        Ok(o) => match String::from_utf8(o.stdout) {
+            Ok(s) => s,
+            Err(_) => return result,
+        },
         Err(_) => return result,
     };
 
@@ -336,13 +348,13 @@ fn docker_exec_inspect(exec_id: &str) -> Option<DockerExecInspect> {
     serde_json::from_str(body.trim()).ok()
 }
 
-fn list_with_filter(
+async fn list_with_filter(
     filters: &[&str],
     project_scope: Option<&str>,
     config: &Config,
 ) -> eyre::Result<Vec<Workspace>> {
     // Phase 1: Docker discovery
-    let containers = docker_ps(filters)?;
+    let containers = docker_ps(filters).await?;
 
     // Group containers by worktree path
     struct WorktreeGroup {
@@ -377,7 +389,7 @@ fn list_with_filter(
     };
 
     for (proj_name, project) in &projects_to_scan {
-        if let Ok(worktrees) = git_worktrees(&project.path, &project.workspace_dir) {
+        if let Ok(worktrees) = git_worktrees(&project.path, &project.workspace_dir).await {
             for wt in worktrees {
                 groups.entry(wt).or_insert_with(|| WorktreeGroup {
                     project: proj_name.to_string(),
@@ -394,18 +406,19 @@ fn list_with_filter(
         .flat_map(|g| g.container_ids.iter().cloned())
         .collect();
 
-    let stats_map = docker_stats(&all_container_ids);
-    let mut execs_map = detect_execs(&all_container_ids);
+    let stats_map = docker_stats(&all_container_ids).await;
+    let mut execs_map = detect_execs(&all_container_ids).await;
 
     let mut workspaces = Vec::new();
     for (path, group) in groups {
         // dirty check
         let dirty = if path.exists() {
-            duct::cmd!("git", "status", "--porcelain")
-                .dir(&path)
-                .unchecked()
-                .read()
-                .map(|o| !o.trim().is_empty())
+            Command::new("git")
+                .args(["status", "--porcelain"])
+                .current_dir(&path)
+                .output()
+                .await
+                .map(|o| !o.stdout.is_empty())
                 .unwrap_or(false)
         } else {
             false

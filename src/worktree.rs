@@ -1,9 +1,11 @@
 use std::path::{Path, PathBuf};
+use std::process::Stdio;
 
 use jiff::Zoned;
 use nanoid::nanoid;
+use tokio::process::Command;
 
-pub fn create(repo_path: &Path, workspace_dir: &Path, name: &str) -> eyre::Result<PathBuf> {
+pub async fn create(repo_path: &Path, workspace_dir: &Path, name: &str) -> eyre::Result<PathBuf> {
     // Validate it's a git repo
     gix::open(repo_path)?;
 
@@ -15,10 +17,15 @@ pub fn create(repo_path: &Path, workspace_dir: &Path, name: &str) -> eyre::Resul
         ));
     }
 
-    duct::cmd!("git", "worktree", "add", "--detach", &worktree_path, "HEAD")
-        .dir(repo_path)
-        .stdout_capture()
-        .run()?;
+    let status = Command::new("git")
+        .args(["worktree", "add", "--detach"])
+        .arg(&worktree_path)
+        .arg("HEAD")
+        .current_dir(repo_path)
+        .stdout(Stdio::null())
+        .status()
+        .await?;
+    eyre::ensure!(status.success(), "git worktree add failed");
 
     Ok(worktree_path)
 }

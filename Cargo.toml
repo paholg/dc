@@ -1,0 +1,27 @@
+[package]
+name    = "dc"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+bollard              = "0.20.1"
+clap                 = { version = "4.5.57", features = ["derive"] }
+color-eyre           = "0.6.5"
+config               = "0.15.19"
+crossterm            = "0.29"
+directories          = "6.0.0"
+duct                 = "1.1.1"
+duct_sh              = "1.0.0"
+eyre                 = "0.6.12"
+gix                  = "0.78.0"
+indexmap             = { version = "2.13.0", features = ["serde"] }
+indicatif            = "0.18"
+jiff                 = "0.2"
+tracing-indicatif    = "0.3"
+serde                = { version = "1.0.228", features = ["derive"] }
+serde-inline-default = "1.0.1"
+serde_json           = { version = "1.0.149", features = ["preserve_order"] }
+serde_with           = "3"
+toml                 = { version = "0.9.11", features = ["serde"] }
+tracing              = "0.1"
+tracing-subscriber   = { version = "0.3", features = ["registry"] }

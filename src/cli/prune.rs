@@ -3,17 +3,15 @@ use std::collections::HashMap;
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
 
-use bollard::Docker;
-use clap::Args;
-use tokio::process::Command;
-use tracing::warn;
-
 use crate::ansi::{CYAN, GREEN, RED, RESET, YELLOW};
 use crate::config::Config;
 use crate::devcontainer::DevContainer;
 use crate::runner::Runnable;
 use crate::runner::run_parallel;
-use crate::workspace::{Workspace, workspace_table};
+use crate::workspace::{Speed, Workspace, workspace_table};
+use bollard::Docker;
+use clap::Args;
+use tokio::process::Command;
 
 #[derive(Debug, Args)]
 pub struct Prune {
@@ -40,7 +38,7 @@ impl Prune {
             return Ok(());
         }
 
-        let workspaces = Workspace::list_project(docker, self.project.as_deref(), config).await?;
+        let workspaces = Workspace::list_project(docker, self.project.as_deref(), config, Speed::Slow).await?;
         let ws_map: HashMap<&Path, &Workspace> = workspaces
             .iter()
             .map(|ws| (ws.path.as_path(), ws))
@@ -69,12 +67,12 @@ impl Prune {
 
         if !in_use.is_empty() {
             println!("{GREEN}In Use{RESET} ({CYAN}skipping{RESET}):");
-            print!("{}", workspace_table(in_use.iter().copied()));
+            print!("{}", workspace_table(in_use.iter().copied())?);
             println!();
         }
         if !dirty.is_empty() {
             println!("{RED}Dirty{RESET} ({CYAN}skipping{RESET}):");
-            print!("{}", workspace_table(dirty.iter().copied()));
+            print!("{}", workspace_table(dirty.iter().copied())?);
             println!();
         }
 
@@ -84,7 +82,7 @@ impl Prune {
 
         println!("{YELLOW}Will Remove - DATA WILL BE LOST{RESET}:");
         if !to_clean_ws.is_empty() {
-            print!("{}", workspace_table(to_clean_ws.iter().copied()));
+            print!("{}", workspace_table(to_clean_ws.iter().copied())?);
         }
         for p in &to_clean_orphans {
             println!("  {}", p.display());
@@ -132,14 +130,13 @@ async fn list_worktrees(repo_path: &Path, workspace_dir: &Path) -> eyre::Result<
     eyre::ensure!(out.status.success(), "git worktree list failed");
     let output = String::from_utf8(out.stdout)?;
 
-    let workspace_dir = workspace_dir.canonicalize().unwrap_or(workspace_dir.into());
+    let workspace_dir = workspace_dir.canonicalize()?;
     let mut worktrees = Vec::new();
 
     for line in output.lines() {
         if let Some(path_str) = line.strip_prefix("worktree ") {
             let path = PathBuf::from(path_str);
-            let canonical = path.canonicalize().unwrap_or(path.clone());
-            if canonical.starts_with(&workspace_dir) {
+            if path.starts_with(&workspace_dir) {
                 worktrees.push(path);
             }
         }
@@ -172,17 +169,12 @@ impl Runnable for Cleanup<'_> {
             .status()
             .await;
 
-        if let Err(e) = down_result {
-            warn!(
-                "docker compose down failed for {}: {e}",
-                self.path.display()
-            );
-        }
+        down_result?;
 
         let override_file =
             std::env::temp_dir().join(format!("{}-override.yml", self.compose_name));
         if override_file.exists() {
-            let _ = std::fs::remove_file(&override_file);
+            std::fs::remove_file(&override_file)?;
         }
 
         let force = !self.path.exists();

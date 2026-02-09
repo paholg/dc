@@ -1,6 +1,6 @@
 use crate::config::Config;
 use crate::devcontainer::DevContainer;
-use crate::workspace::Workspace;
+use crate::workspace::{Speed, Workspace};
 use bollard::Docker;
 use bollard::secret::ContainerSummaryStateEnum;
 use clap::Args;
@@ -27,7 +27,7 @@ pub struct Fwd {
 impl Fwd {
     pub async fn run(self, docker: &Docker, config: &Config) -> eyre::Result<()> {
         let (container_id, project, ws_name) = if let Some(ref name) = self.name {
-            let workspaces = Workspace::list_project(docker, None, config).await?;
+            let workspaces = Workspace::list_project(docker, None, config, Speed::Fast).await?;
             let ws = workspaces
                 .into_iter()
                 .find(|ws| {
@@ -49,7 +49,7 @@ impl Fwd {
             (cid, ws.project, ws_name)
         } else {
             let mut workspaces =
-                Workspace::list_project(docker, self.project.as_deref(), config).await?;
+                Workspace::list_project(docker, self.project.as_deref(), config, Speed::Fast).await?;
             workspaces.retain(|ws| ws.status == ContainerSummaryStateEnum::RUNNING);
             let (path, cid, project) = crate::workspace::pick_workspace(workspaces)?;
             let ws_name = path

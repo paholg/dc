@@ -15,12 +15,18 @@ use crate::cli::up::compose_project_name;
 use crate::config::Config;
 use crate::devcontainer::DevContainer;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Speed {
+    Fast,
+    Slow,
+}
+
 #[derive(Debug)]
 pub struct Stats {
     /// Current memory use in bytes.
     pub ram: u64,
     /// Current CPU use, in percent.
-    pub cpu: f32,
+    pub cpu: Option<f32>,
 }
 
 #[derive(Debug)]
@@ -49,24 +55,29 @@ struct ContainerInfo {
 }
 
 impl Workspace {
-    pub async fn list_all(docker: &Docker, config: &Config) -> eyre::Result<Vec<Workspace>> {
+    pub async fn list_all(
+        docker: &Docker,
+        config: &Config,
+        speed: Speed,
+    ) -> eyre::Result<Vec<Workspace>> {
         let mut filters = HashMap::new();
         filters.insert("label".to_string(), vec!["dev.dc.managed=true".to_string()]);
-        list_with_filter(docker, filters, None, config).await
+        list_with_filter(docker, filters, None, config, speed).await
     }
 
     pub async fn list_project(
         docker: &Docker,
         project: Option<&str>,
         config: &Config,
+        speed: Speed,
     ) -> eyre::Result<Vec<Workspace>> {
         match project {
             Some(name) => {
                 let mut filters = HashMap::new();
                 filters.insert("label".to_string(), vec![format!("dev.dc.project={name}")]);
-                list_with_filter(docker, filters, Some(name), config).await
+                list_with_filter(docker, filters, Some(name), config, speed).await
             }
-            None => Self::list_all(docker, config).await,
+            None => Self::list_all(docker, config, speed).await,
         }
     }
 }
@@ -103,8 +114,12 @@ struct WsFields {
     mem: String,
 }
 
-fn ws_fields(ws: &Workspace) -> WsFields {
-    let name = ws.path.file_name().unwrap_or_default().to_string_lossy();
+fn ws_fields(ws: &Workspace) -> eyre::Result<WsFields> {
+    let name = ws
+        .path
+        .file_name()
+        .ok_or_else(|| eyre!("workspace path has no filename"))?
+        .to_string_lossy();
     let name = if ws.dirty {
         format!("{name}*")
     } else {
@@ -114,30 +129,27 @@ fn ws_fields(ws: &Workspace) -> WsFields {
         ContainerSummaryStateEnum::EMPTY => "-".to_string(),
         ref s => s.to_string(),
     };
-    let cpu = ws.stats.as_ref().map_or("-".into(), |s| {
-        if s.cpu < 0.05 {
-            "-".into()
-        } else {
-            format!("{:.1}%", s.cpu)
-        }
+    let cpu = ws.stats.as_ref().map_or("-".into(), |s| match s.cpu {
+        Some(cpu) => format!("{:.1}%", cpu),
+        None => "-".into(),
     });
     let mem = ws
         .stats
         .as_ref()
         .map_or("-".into(), |s| format_bytes(s.ram));
-    WsFields {
+    Ok(WsFields {
         name,
         project: ws.project.clone(),
         status,
         cpu,
         mem,
-    }
+    })
 }
 
-fn ws_rows(ws: &Workspace) -> Vec<Row> {
-    let f = ws_fields(ws);
+fn ws_rows(ws: &Workspace) -> eyre::Result<Vec<Row>> {
+    let f = ws_fields(ws)?;
     if ws.execs.is_empty() {
-        return vec![
+        return Ok(vec![
             Row::new()
                 .with_cell(f.name)
                 .with_cell(f.project)
@@ -145,7 +157,7 @@ fn ws_rows(ws: &Workspace) -> Vec<Row> {
                 .with_cell(f.cpu)
                 .with_ansi_cell(f.mem)
                 .with_cell("-"),
-        ];
+        ]);
     }
     let mut rows = Vec::with_capacity(ws.execs.len());
     for (i, exec) in ws.execs.iter().enumerate() {
@@ -172,11 +184,11 @@ fn ws_rows(ws: &Workspace) -> Vec<Row> {
             );
         }
     }
-    rows
+    Ok(rows)
 }
 
-fn ws_row_compact(ws: &Workspace) -> Row {
-    let f = ws_fields(ws);
+fn ws_row_compact(ws: &Workspace) -> eyre::Result<Row> {
+    let f = ws_fields(ws)?;
     let execs = if ws.execs.is_empty() {
         "-".into()
     } else {
@@ -186,17 +198,19 @@ fn ws_row_compact(ws: &Workspace) -> Row {
             .collect::<Vec<_>>()
             .join(", ")
     };
-    Row::new()
+    Ok(Row::new()
         .with_cell(f.name)
         .with_cell(f.project)
         .with_cell(f.status)
         .with_cell(f.cpu)
         .with_ansi_cell(f.mem)
-        .with_cell(execs)
+        .with_cell(execs))
 }
 
 /// Full table with header row, for `list` output.
-pub fn workspace_table<'a>(workspaces: impl IntoIterator<Item = &'a Workspace>) -> Table {
+pub fn workspace_table<'a>(
+    workspaces: impl IntoIterator<Item = &'a Workspace>,
+) -> eyre::Result<Table> {
     let mut table = Table::new(TABLE_SPEC);
     table.add_row(
         Row::new()
@@ -208,28 +222,28 @@ pub fn workspace_table<'a>(workspaces: impl IntoIterator<Item = &'a Workspace>) 
             .with_cell("EXECS"),
     );
     for ws in workspaces {
-        for row in ws_rows(ws) {
+        for row in ws_rows(ws)? {
             table.add_row(row);
         }
     }
-    table
+    Ok(table)
 }
 
 /// Pair each workspace with its aligned table-row string, for the picker.
-pub fn picker_items(workspaces: Vec<Workspace>) -> Vec<PickerItem> {
+pub fn picker_items(workspaces: Vec<Workspace>) -> eyre::Result<Vec<PickerItem>> {
     let mut table = Table::new(TABLE_SPEC);
     for ws in &workspaces {
-        table.add_row(ws_row_compact(ws));
+        table.add_row(ws_row_compact(ws)?);
     }
     let rendered = table.to_string();
-    workspaces
+    Ok(workspaces
         .into_iter()
         .zip(rendered.lines())
         .map(|(workspace, line)| PickerItem {
             workspace,
             rendered: line.to_string(),
         })
-        .collect()
+        .collect())
 }
 
 pub struct PickerItem {
@@ -261,7 +275,7 @@ pub fn pick_workspace(workspaces: Vec<Workspace>) -> eyre::Result<(PathBuf, Stri
             Ok((ws.path, cid, project))
         }
         _ => {
-            let items = picker_items(workspaces);
+            let items = picker_items(workspaces)?;
             let mut picker = Picker::new(PickerItemRenderer);
             let injector = picker.injector();
             for item in items {
@@ -298,7 +312,7 @@ async fn docker_ps(
 
     let mut result = Vec::new();
     for c in containers {
-        let labels = c.labels.unwrap_or_default();
+        let labels = c.labels.ok_or_else(|| eyre!("container missing labels"))?;
         let local_folder = match labels.get("devcontainer.local_folder") {
             Some(f) => PathBuf::from(f),
             None => continue,
@@ -308,7 +322,7 @@ async fn docker_ps(
             Some(id) => id,
             None => continue,
         };
-        let state = c.state.unwrap_or(ContainerSummaryStateEnum::EMPTY);
+        let state = c.state.ok_or_else(|| eyre!("container missing state"))?;
 
         result.push(ContainerInfo {
             id,
@@ -331,14 +345,13 @@ async fn git_worktrees(repo_path: &Path, workspace_dir: &Path) -> eyre::Result<V
     eyre::ensure!(out.status.success(), "git worktree list failed");
     let output = String::from_utf8(out.stdout)?;
 
-    let workspace_dir = workspace_dir.canonicalize().unwrap_or(workspace_dir.into());
+    let workspace_dir = workspace_dir.canonicalize()?;
     let mut worktrees = Vec::new();
 
     for line in output.lines() {
         if let Some(path_str) = line.strip_prefix("worktree ") {
             let path = PathBuf::from(path_str);
-            let canonical = path.canonicalize().unwrap_or(path.clone());
-            if canonical.starts_with(&workspace_dir) {
+            if path.starts_with(&workspace_dir) {
                 worktrees.push(path);
             }
         }
@@ -347,13 +360,16 @@ async fn git_worktrees(repo_path: &Path, workspace_dir: &Path) -> eyre::Result<V
     Ok(worktrees)
 }
 
-// Phase 3a: docker stats (one request per container via bollard stream)
-async fn docker_stats(docker: &Docker, container_ids: &[String]) -> eyre::Result<HashMap<String, Stats>> {
-    let mut map = HashMap::new();
+// Phase 3a (fast): single one_shot reading — memory only, no CPU delta.
+async fn docker_stats_fast(
+    docker: &Docker,
+    container_ids: &[String],
+) -> eyre::Result<HashMap<String, Stats>> {
     if container_ids.is_empty() {
-        return Ok(map);
+        return Ok(HashMap::new());
     }
 
+    let mut map = HashMap::new();
     for id in container_ids {
         let mut stream = docker.stats(
             id,
@@ -368,11 +384,8 @@ async fn docker_stats(docker: &Docker, container_ids: &[String]) -> eyre::Result
                     .memory_stats
                     .as_ref()
                     .and_then(|m| m.usage)
-                    .unwrap_or(0);
-
-                let cpu = compute_cpu_percent(&stats);
-
-                map.insert(id.clone(), Stats { ram, cpu });
+                    .ok_or_else(|| eyre!("missing memory stats for container {id}"))?;
+                map.insert(id.clone(), Stats { ram, cpu: None });
             }
             Some(Err(e)) => return Err(e.into()),
             None => return Err(eyre!("no stats response for container {id}")),
@@ -381,37 +394,67 @@ async fn docker_stats(docker: &Docker, container_ids: &[String]) -> eyre::Result
     Ok(map)
 }
 
-fn compute_cpu_percent(stats: &bollard::models::ContainerStatsResponse) -> f32 {
-    let cpu = match stats.cpu_stats.as_ref() {
-        Some(c) => c,
-        None => return 0.0,
-    };
-    let precpu = match stats.precpu_stats.as_ref() {
-        Some(c) => c,
-        None => return 0.0,
-    };
+// Phase 3a (full): concurrent streams, two readings each for CPU delta.
+async fn docker_stats_full(
+    docker: &Docker,
+    container_ids: &[String],
+) -> eyre::Result<HashMap<String, Stats>> {
+    if container_ids.is_empty() {
+        return Ok(HashMap::new());
+    }
 
-    let total = cpu
-        .cpu_usage
-        .as_ref()
-        .and_then(|u| u.total_usage)
-        .unwrap_or(0);
-    let pre_total = precpu
-        .cpu_usage
-        .as_ref()
-        .and_then(|u| u.total_usage)
-        .unwrap_or(0);
-    let system = cpu.system_cpu_usage.unwrap_or(0);
-    let pre_system = precpu.system_cpu_usage.unwrap_or(0);
-    let online_cpus = cpu.online_cpus.unwrap_or(1) as f64;
+    let futures: Vec<_> = container_ids
+        .iter()
+        .map(|id| async move {
+            let mut stream = docker.stats(
+                id,
+                Some(StatsOptions {
+                    stream: true,
+                    one_shot: false,
+                }),
+            );
+            // First reading: immediate, gives us memory + baseline CPU counters.
+            let first = match stream.next().await {
+                Some(r) => r?,
+                None => eyre::bail!("no stats response for container {id}"),
+            };
+            let ram = first
+                .memory_stats
+                .as_ref()
+                .and_then(|m| m.usage)
+                .ok_or_else(|| eyre!("missing memory stats for container {id}"))?;
 
-    let cpu_delta = total as f64 - pre_total as f64;
-    let system_delta = system as f64 - pre_system as f64;
+            // Second reading: ~1s later, has a real precpu delta.
+            let cpu = match stream.next().await {
+                Some(Ok(second)) => compute_cpu_percent(&second),
+                _ => None,
+            };
+            Ok::<_, eyre::Report>((id.clone(), Stats { ram, cpu }))
+        })
+        .collect();
+
+    futures::future::try_join_all(futures)
+        .await
+        .map(|v| v.into_iter().collect())
+}
+
+fn compute_cpu_percent(stats: &bollard::models::ContainerStatsResponse) -> Option<f32> {
+    let cpu = stats.cpu_stats.as_ref()?;
+    let precpu = stats.precpu_stats.as_ref()?;
+
+    let total = cpu.cpu_usage.as_ref()?.total_usage?;
+    let pre_total = precpu.cpu_usage.as_ref()?.total_usage?;
+    let system = cpu.system_cpu_usage?;
+    let pre_system = precpu.system_cpu_usage?;
+    let online_cpus = cpu.online_cpus? as f32;
+
+    let cpu_delta = total as f32 - pre_total as f32;
+    let system_delta = system as f32 - pre_system as f32;
 
     if system_delta > 0.0 && cpu_delta >= 0.0 {
-        (cpu_delta / system_delta * online_cpus * 100.0) as f32
+        Some(cpu_delta / system_delta * online_cpus * 100.0)
     } else {
-        0.0
+        Some(0.0)
     }
 }
 
@@ -437,7 +480,7 @@ async fn detect_execs(
             if exec.running != Some(true) {
                 continue;
             }
-            let pid = exec.pid.unwrap_or(0) as u32;
+            let pid = exec.pid.ok_or_else(|| eyre!("running exec has no PID"))? as u32;
             let mut command = Vec::new();
             if let Some(ref pc) = exec.process_config {
                 if let Some(ref ep) = pc.entrypoint {
@@ -462,6 +505,7 @@ async fn list_with_filter(
     filters: HashMap<String, Vec<String>>,
     project_scope: Option<&str>,
     config: &Config,
+    speed: Speed,
 ) -> eyre::Result<Vec<Workspace>> {
     // Phase 1: Docker discovery
     let containers = docker_ps(docker, filters).await?;
@@ -499,7 +543,11 @@ async fn list_with_filter(
     };
 
     for (proj_name, project) in &projects_to_scan {
-        let workspace_dir = DevContainer::load(&project)?.common.customizations.dc.workspace_dir();
+        let workspace_dir = DevContainer::load(&project)?
+            .common
+            .customizations
+            .dc
+            .workspace_dir();
         for wt in git_worktrees(&project.path, &workspace_dir).await? {
             groups.entry(wt).or_insert_with(|| WorktreeGroup {
                 project: proj_name.to_string(),
@@ -515,7 +563,10 @@ async fn list_with_filter(
         .flat_map(|g| g.container_ids.iter().cloned())
         .collect();
 
-    let stats_map = docker_stats(docker, &all_container_ids).await?;
+    let stats_map = match speed {
+        Speed::Slow => docker_stats_full(docker, &all_container_ids).await?,
+        Speed::Fast => docker_stats_fast(docker, &all_container_ids).await?,
+    };
     let mut execs_map = detect_execs(docker, &all_container_ids).await?;
 
     let mut workspaces = Vec::new();
@@ -557,7 +608,7 @@ async fn list_with_filter(
         } else {
             Some(Stats {
                 ram: container_stats.iter().map(|s| s.ram).sum(),
-                cpu: container_stats.iter().map(|s| s.cpu).sum(),
+                cpu: container_stats.iter().filter_map(|s| s.cpu).reduce(|a, b| a + b),
             })
         };
 

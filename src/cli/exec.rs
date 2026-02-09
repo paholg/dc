@@ -5,7 +5,7 @@ use eyre::eyre;
 
 use crate::config::Config;
 use crate::devcontainer::DevContainer;
-use crate::workspace::Workspace;
+use crate::workspace::{Speed, Workspace};
 
 /// Exec into a running devcontainer
 ///
@@ -30,7 +30,7 @@ pub struct Exec {
 impl Exec {
     pub async fn run(self, docker: &Docker, config: &Config) -> eyre::Result<()> {
         let (_path, container_id, project_name) = if let Some(ref name) = self.name {
-            let workspaces = Workspace::list_project(docker, None, config).await?;
+            let workspaces = Workspace::list_project(docker, None, config, Speed::Fast).await?;
             let ws = workspaces
                 .into_iter()
                 .find(|ws| {
@@ -51,7 +51,7 @@ impl Exec {
             (ws.path, cid, ws.project)
         } else {
             let mut workspaces =
-                Workspace::list_project(docker, self.project.as_deref(), config).await?;
+                Workspace::list_project(docker, self.project.as_deref(), config, Speed::Fast).await?;
             workspaces.retain(|ws| ws.status == ContainerSummaryStateEnum::RUNNING);
             let (path, cid, project) = crate::workspace::pick_workspace(workspaces)?;
             (path, cid, project)

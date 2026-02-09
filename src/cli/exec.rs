@@ -51,7 +51,8 @@ impl Exec {
             (ws.path, cid, ws.project)
         } else {
             let mut workspaces =
-                Workspace::list_project(docker, self.project.as_deref(), config, Speed::Fast).await?;
+                Workspace::list_project(docker, self.project.as_deref(), config, Speed::Fast)
+                    .await?;
             workspaces.retain(|ws| ws.status == ContainerSummaryStateEnum::RUNNING);
             let (path, cid, project) = crate::workspace::pick_workspace(workspaces)?;
             (path, cid, project)

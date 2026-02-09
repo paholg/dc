@@ -12,11 +12,7 @@ use tokio::process::Command;
 
 #[derive(Debug, Args)]
 pub struct Prune {
-    #[arg(
-        short,
-        long,
-        help = "name of project [default: all]"
-    )]
+    #[arg(short, long, help = "name of project [default: all]")]
     project: Option<String>,
 
     #[arg(short, long, help = "skip confirmation prompt")]

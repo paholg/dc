@@ -45,6 +45,7 @@ pub struct Workspace {
     pub execs: Vec<ExecSession>,
     pub status: ContainerSummaryStateEnum,
     pub stats: Option<Stats>,
+    pub created: Option<i64>,
 }
 
 struct ContainerInfo {
@@ -52,6 +53,7 @@ struct ContainerInfo {
     state: ContainerSummaryStateEnum,
     local_folder: PathBuf,
     project: String,
+    created: Option<i64>,
 }
 
 impl Workspace {
@@ -61,7 +63,10 @@ impl Workspace {
         speed: Speed,
     ) -> eyre::Result<Vec<Workspace>> {
         let mut filters = HashMap::new();
-        filters.insert("label".to_string(), vec!["devcontainer.local_folder".to_string()]);
+        filters.insert(
+            "label".to_string(),
+            vec!["devcontainer.local_folder".to_string()],
+        );
         list_with_filter(docker, filters, None, config, speed).await
     }
 
@@ -74,7 +79,10 @@ impl Workspace {
         match project {
             Some(name) => {
                 let mut filters = HashMap::new();
-                filters.insert("label".to_string(), vec!["devcontainer.local_folder".to_string()]);
+                filters.insert(
+                    "label".to_string(),
+                    vec!["devcontainer.local_folder".to_string()],
+                );
                 list_with_filter(docker, filters, Some(name), config, speed).await
             }
             None => Self::list_all(docker, config, speed).await,
@@ -82,7 +90,7 @@ impl Workspace {
     }
 }
 
-const TABLE_SPEC: &str = "{:<}  {:<}  {:<}  {:>}  {:>}  {:<}";
+const TABLE_SPEC: &str = "{:<}  {:<}  {:<}  {:>}  {:>}  {:>}  {:<}";
 
 fn format_exec(exec: &ExecSession) -> String {
     const MAX_LEN: usize = 40;
@@ -106,10 +114,37 @@ fn format_exec(exec: &ExecSession) -> String {
     out
 }
 
+fn format_age(created: Option<i64>) -> String {
+    let ts = match created {
+        Some(secs) => jiff::Timestamp::from_second(secs).ok(),
+        None => None,
+    };
+    let ts = match ts {
+        Some(t) => t,
+        None => return "-".into(),
+    };
+    let dur = jiff::Timestamp::now().duration_since(ts);
+    let secs = dur.as_secs();
+    if secs < 0 {
+        return "-".into();
+    }
+    let secs = secs as u64;
+    match secs {
+        s if s < 60 => format!("{s}s"),
+        s if s < 3600 => format!("{}m", s / 60),
+        s if s < 86400 => format!("{}h", s / 3600),
+        s if s < 604800 => format!("{}d", s / 86400),
+        s if s < 2_592_000 => format!("{}w", s / 604800),
+        s if s < 31_536_000 => format!("{}mo", s / 2_592_000),
+        s => format!("{}y", s / 31_536_000),
+    }
+}
+
 struct WsFields {
     name: String,
     project: String,
     status: String,
+    created: String,
     cpu: String,
     mem: String,
 }
@@ -141,6 +176,7 @@ fn ws_fields(ws: &Workspace) -> eyre::Result<WsFields> {
         name,
         project: ws.project.clone(),
         status,
+        created: format_age(ws.created),
         cpu,
         mem,
     })
@@ -154,6 +190,7 @@ fn ws_rows(ws: &Workspace) -> eyre::Result<Vec<Row>> {
                 .with_cell(f.name)
                 .with_cell(f.project)
                 .with_cell(f.status)
+                .with_cell(f.created)
                 .with_cell(f.cpu)
                 .with_ansi_cell(f.mem)
                 .with_cell("-"),
@@ -168,6 +205,7 @@ fn ws_rows(ws: &Workspace) -> eyre::Result<Vec<Row>> {
                     .with_cell(&f.name)
                     .with_cell(&f.project)
                     .with_cell(&f.status)
+                    .with_cell(&f.created)
                     .with_cell(&f.cpu)
                     .with_ansi_cell(&f.mem)
                     .with_cell(cmd),
@@ -175,6 +213,7 @@ fn ws_rows(ws: &Workspace) -> eyre::Result<Vec<Row>> {
         } else {
             rows.push(
                 Row::new()
+                    .with_cell("")
                     .with_cell("")
                     .with_cell("")
                     .with_cell("")
@@ -202,6 +241,7 @@ fn ws_row_compact(ws: &Workspace) -> eyre::Result<Row> {
         .with_cell(f.name)
         .with_cell(f.project)
         .with_cell(f.status)
+        .with_cell(f.created)
         .with_cell(f.cpu)
         .with_ansi_cell(f.mem)
         .with_cell(execs))
@@ -217,6 +257,7 @@ pub fn workspace_table<'a>(
             .with_cell("NAME")
             .with_cell("PROJECT")
             .with_cell("STATUS")
+            .with_cell("CREATED")
             .with_cell("CPU")
             .with_cell("MEM")
             .with_cell("EXECS"),
@@ -362,6 +403,7 @@ async fn docker_ps(
             state,
             local_folder,
             project,
+            created: c.created,
         });
     }
 
@@ -548,6 +590,7 @@ async fn list_with_filter(
         project: String,
         container_ids: Vec<String>,
         states: Vec<ContainerSummaryStateEnum>,
+        created: Option<i64>,
     }
     let mut groups: HashMap<PathBuf, WorktreeGroup> = HashMap::new();
     for c in &containers {
@@ -557,18 +600,23 @@ async fn list_with_filter(
                 project: c.project.clone(),
                 container_ids: Vec::new(),
                 states: Vec::new(),
+                created: None,
             });
         group.container_ids.push(c.id.clone());
         group.states.push(c.state);
+        if let Some(ts) = c.created {
+            group.created = Some(match group.created {
+                Some(prev) => prev.min(ts),
+                None => ts,
+            });
+        }
     }
 
     // Resolve project for unmanaged containers (no dev.dc.project label)
     let canonical_projects: Vec<(String, PathBuf)> = config
         .projects
         .iter()
-        .filter_map(|(name, proj)| {
-            proj.path.canonicalize().ok().map(|c| (name.clone(), c))
-        })
+        .filter_map(|(name, proj)| proj.path.canonicalize().ok().map(|c| (name.clone(), c)))
         .collect();
     let resolutions: Vec<(PathBuf, String)> = groups
         .iter()
@@ -608,6 +656,7 @@ async fn list_with_filter(
                 project: proj_name.to_string(),
                 container_ids: Vec::new(),
                 states: Vec::new(),
+                created: None,
             });
 
         let workspace_dir = DevContainer::load(project)?
@@ -620,6 +669,7 @@ async fn list_with_filter(
                 project: proj_name.to_string(),
                 container_ids: Vec::new(),
                 states: Vec::new(),
+                created: None,
             });
         }
     }
@@ -698,6 +748,7 @@ async fn list_with_filter(
             execs,
             status,
             stats,
+            created: group.created,
         });
     }
 

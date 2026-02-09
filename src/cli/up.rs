@@ -20,11 +20,7 @@ pub struct Up {
     )]
     project: Option<String>,
 
-    #[arg(
-        short,
-        long,
-        help = "name of new workspace, leave blank for it to be generated"
-    )]
+    #[arg(help = "name of new workspace, leave blank for it to be generated")]
     name: Option<PathBuf>,
 
     #[arg(
@@ -46,7 +42,8 @@ impl Up {
             .map(|p| p.to_string_lossy().into_owned())
             .unwrap_or_else(|| worktree::generate_name(name));
 
-        let worktree_path = worktree::create(&project.path, &project.workspace_dir, &ws_name).await?;
+        let worktree_path =
+            worktree::create(&project.path, &project.workspace_dir, &ws_name).await?;
 
         let dc = DevContainer::load(&worktree_path)?;
 
@@ -75,7 +72,8 @@ impl Up {
 
         // Lifecycle commands in the container
         if let Some(ref cmd) = dc.common.on_create_command {
-            cmd.run_in_container("onCreateCommand", &container_id, user, workdir, remote_env).await?;
+            cmd.run_in_container("onCreateCommand", &container_id, user, workdir, remote_env)
+                .await?;
         }
         if let Some(ref cmd) = dc.common.update_content_command {
             cmd.run_in_container(
@@ -84,7 +82,8 @@ impl Up {
                 user,
                 workdir,
                 remote_env,
-            ).await?;
+            )
+            .await?;
         }
         if let Some(ref cmd) = dc.common.post_create_command {
             cmd.run_in_container(
@@ -93,10 +92,12 @@ impl Up {
                 user,
                 workdir,
                 remote_env,
-            ).await?;
+            )
+            .await?;
         }
         if let Some(ref cmd) = dc.common.post_start_command {
-            cmd.run_in_container("postStartCommand", &container_id, user, workdir, remote_env).await?;
+            cmd.run_in_container("postStartCommand", &container_id, user, workdir, remote_env)
+                .await?;
         }
 
         // Interactive exec if requested
@@ -210,7 +211,11 @@ fn compose_base_args(compose: &Compose, worktree_path: &Path, override_file: &Pa
     args
 }
 
-async fn compose_up(compose: &Compose, worktree_path: &Path, override_file: &Path) -> eyre::Result<()> {
+async fn compose_up(
+    compose: &Compose,
+    worktree_path: &Path,
+    override_file: &Path,
+) -> eyre::Result<()> {
     let mut args = vec1::vec1!["docker".into()];
     args.extend(compose_base_args(compose, worktree_path, override_file));
     args.extend(["up".into(), "-d".into(), "--build".into()]);

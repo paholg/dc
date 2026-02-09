@@ -7,8 +7,9 @@ use clap::Args;
 use tokio::process::Command;
 use tracing::warn;
 
+use crate::ansi::{CYAN, GREEN, RED, RESET, YELLOW};
 use crate::config::Config;
-use crate::workspace::Workspace;
+use crate::workspace::{Workspace, workspace_table};
 
 #[derive(Debug, Args)]
 pub struct Prune {
@@ -41,45 +42,45 @@ impl Prune {
 
         let mut in_use = Vec::new();
         let mut dirty = Vec::new();
-        let mut to_clean = Vec::new();
+        let mut to_clean_ws = Vec::new();
+        let mut to_clean_orphans = Vec::new();
 
         for path in worktrees {
             if !path.exists() {
-                to_clean.push(path);
+                to_clean_orphans.push(path);
             } else if let Some(ws) = ws_map.get(path.as_path()) {
                 if !ws.execs.is_empty() {
-                    in_use.push(path);
+                    in_use.push(*ws);
                 } else if ws.dirty {
-                    dirty.push(path);
+                    dirty.push(*ws);
                 } else {
-                    to_clean.push(path);
+                    to_clean_ws.push(*ws);
                 }
             } else {
-                to_clean.push(path);
+                to_clean_orphans.push(path);
             }
         }
 
         if !in_use.is_empty() {
-            println!("In use (skipping):");
-            for p in &in_use {
-                println!("  {}", p.display());
-            }
+            println!("{GREEN}In use{RESET} ({CYAN}skipping{RESET}):");
+            print!("{}", workspace_table(in_use.iter().copied()));
             println!();
         }
         if !dirty.is_empty() {
-            println!("Dirty (skipping):");
-            for p in &dirty {
-                println!("  {}", p.display());
-            }
+            println!("{RED}Dirty{RESET} ({CYAN}skipping{RESET}):");
+            print!("{}", workspace_table(dirty.iter().copied()));
             println!();
         }
 
-        if to_clean.is_empty() {
+        if to_clean_ws.is_empty() && to_clean_orphans.is_empty() {
             return Ok(());
         }
 
-        println!("Will remove:");
-        for p in &to_clean {
+        println!("{YELLOW}Will remove{RESET}:");
+        if !to_clean_ws.is_empty() {
+            print!("{}", workspace_table(to_clean_ws.iter().copied()));
+        }
+        for p in &to_clean_orphans {
             println!("  {}", p.display());
         }
         println!();
@@ -89,7 +90,11 @@ impl Prune {
             return Ok(());
         }
 
-        for path in &to_clean {
+        for ws in &to_clean_ws {
+            let compose_name = super::up::compose_project_name(&ws.path);
+            cleanup(&project.path, &ws.path, &compose_name).await?;
+        }
+        for path in &to_clean_orphans {
             let compose_name = super::up::compose_project_name(path);
             cleanup(&project.path, path, &compose_name).await?;
         }
@@ -125,7 +130,14 @@ async fn list_worktrees(repo_path: &Path, workspace_dir: &Path) -> eyre::Result<
 
 async fn cleanup(repo_path: &Path, path: &Path, compose_name: &str) -> eyre::Result<()> {
     let down_result = Command::new("docker")
-        .args(["compose", "-p", compose_name, "down", "-v", "--remove-orphans"])
+        .args([
+            "compose",
+            "-p",
+            compose_name,
+            "down",
+            "-v",
+            "--remove-orphans",
+        ])
         .status()
         .await;
 

@@ -193,7 +193,7 @@ fn ws_row_compact(ws: &Workspace) -> Row {
 }
 
 /// Full table with header row, for `list` output.
-pub fn workspace_table(workspaces: &[Workspace]) -> Table {
+pub fn workspace_table<'a>(workspaces: impl IntoIterator<Item = &'a Workspace>) -> Table {
     let mut table = Table::new(TABLE_SPEC);
     table.add_row(
         Row::new()

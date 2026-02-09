@@ -15,7 +15,7 @@ pub struct Prune {
     #[arg(
         short,
         long,
-        help = "name of project [default: The first one configured]"
+        help = "name of project [default: all]"
     )]
     project: Option<String>,
 
@@ -25,8 +25,6 @@ pub struct Prune {
 
 impl Prune {
     pub async fn run(self, docker: &Docker, config: &Config) -> eyre::Result<()> {
-        let (_, project) = config.project(self.project.as_deref())?;
-
         let workspaces =
             Workspace::list_project(docker, self.project.as_deref(), config, Speed::Slow).await?;
 
@@ -35,7 +33,8 @@ impl Prune {
         let mut to_clean = Vec::new();
 
         for ws in &workspaces {
-            if ws.path == project.path || !ws.execs.is_empty() {
+            let (_, proj) = config.project(Some(&ws.project))?;
+            if ws.path == proj.path || !ws.execs.is_empty() {
                 in_use.push(ws);
             } else if ws.dirty {
                 dirty.push(ws);
@@ -70,14 +69,17 @@ impl Prune {
 
         let cleanups: Vec<Cleanup> = to_clean
             .iter()
-            .map(|ws| Cleanup {
-                repo_path: &project.path,
-                path: &ws.path,
-                compose_name: super::up::compose_project_name(&ws.path),
-                remove_worktree: ws.path.exists(),
-                force: false,
+            .map(|ws| {
+                let (_, proj) = config.project(Some(&ws.project))?;
+                Ok(Cleanup {
+                    repo_path: &proj.path,
+                    path: &ws.path,
+                    compose_name: super::up::compose_project_name(&ws.path),
+                    remove_worktree: ws.path.exists(),
+                    force: false,
+                })
             })
-            .collect();
+            .collect::<eyre::Result<Vec<_>>>()?;
         let cleanups = CleanupMany { cleanups };
         runner::run("", &cleanups, None).await?;
 

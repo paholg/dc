@@ -8,6 +8,7 @@ use futures::StreamExt;
 use tabular::{Row, Table};
 use tokio::process::Command;
 
+use crate::bytes::format_bytes;
 use crate::cli::up::compose_project_name;
 use crate::config::Config;
 
@@ -67,29 +68,16 @@ impl Workspace {
     }
 }
 
-fn format_ram(bytes: u64) -> String {
-    const KIB: f64 = 1024.0;
-    const MIB: f64 = KIB * 1024.0;
-    const GIB: f64 = MIB * 1024.0;
-    let b = bytes as f64;
-    if b >= GIB {
-        format!("{:.1}G", b / GIB)
-    } else if b >= MIB {
-        format!("{:.0}M", b / MIB)
-    } else if b >= KIB {
-        format!("{:.0}K", b / KIB)
-    } else {
-        format!("{bytes}B")
-    }
-}
-
 const TABLE_SPEC: &str = "{:<}  {:<}  {:<}  {:>}  {:>}  {:<}";
 
 fn format_exec(exec: &ExecSession) -> String {
     const MAX_LEN: usize = 40;
     let mut parts = exec.command.iter();
     let first = match parts.next() {
-        Some(s) => Path::new(s).file_name().unwrap_or(s.as_ref()).to_string_lossy(),
+        Some(s) => Path::new(s)
+            .file_name()
+            .unwrap_or(s.as_ref())
+            .to_string_lossy(),
         None => return String::new(),
     };
     let mut out = first.into_owned();
@@ -130,7 +118,10 @@ fn ws_fields(ws: &Workspace) -> WsFields {
             format!("{:.1}%", s.cpu)
         }
     });
-    let mem = ws.stats.as_ref().map_or("-".into(), |s| format_ram(s.ram));
+    let mem = ws
+        .stats
+        .as_ref()
+        .map_or("-".into(), |s| format_bytes(s.ram));
     WsFields {
         name,
         project: ws.project.clone(),
@@ -143,13 +134,15 @@ fn ws_fields(ws: &Workspace) -> WsFields {
 fn ws_rows(ws: &Workspace) -> Vec<Row> {
     let f = ws_fields(ws);
     if ws.execs.is_empty() {
-        return vec![Row::new()
-            .with_cell(f.name)
-            .with_cell(f.project)
-            .with_cell(f.status)
-            .with_cell(f.cpu)
-            .with_cell(f.mem)
-            .with_cell("-")];
+        return vec![
+            Row::new()
+                .with_cell(f.name)
+                .with_cell(f.project)
+                .with_cell(f.status)
+                .with_cell(f.cpu)
+                .with_ansi_cell(f.mem)
+                .with_cell("-"),
+        ];
     }
     let mut rows = Vec::with_capacity(ws.execs.len());
     for (i, exec) in ws.execs.iter().enumerate() {
@@ -161,7 +154,7 @@ fn ws_rows(ws: &Workspace) -> Vec<Row> {
                     .with_cell(&f.project)
                     .with_cell(&f.status)
                     .with_cell(&f.cpu)
-                    .with_cell(&f.mem)
+                    .with_ansi_cell(&f.mem)
                     .with_cell(cmd),
             );
         } else {
@@ -184,14 +177,18 @@ fn ws_row_compact(ws: &Workspace) -> Row {
     let execs = if ws.execs.is_empty() {
         "-".into()
     } else {
-        ws.execs.iter().map(format_exec).collect::<Vec<_>>().join(", ")
+        ws.execs
+            .iter()
+            .map(format_exec)
+            .collect::<Vec<_>>()
+            .join(", ")
     };
     Row::new()
         .with_cell(f.name)
         .with_cell(f.project)
         .with_cell(f.status)
         .with_cell(f.cpu)
-        .with_cell(f.mem)
+        .with_ansi_cell(f.mem)
         .with_cell(execs)
 }
 

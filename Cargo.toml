@@ -30,4 +30,4 @@ vec1                 = { version = "1.12.1", features = ["serde"] }
 bollard = "0.20.1"
 tokio = { version = "1.49.0", features = ["full"] }
 futures = "0.3.31"
-tabular = "0.2.0"
+tabular = { version = "0.2.0", features = ["ansi-cell"] }

@@ -83,10 +83,25 @@ fn format_ram(bytes: u64) -> String {
     }
 }
 
-const TABLE_SPEC: &str = "{:<}  {:<}  {:<}  {:>}  {:>}  {:>}";
+const TABLE_SPEC: &str = "{:<}  {:<}  {:<}  {:>}  {:>}  {:<}";
 
 fn format_exec(exec: &ExecSession) -> String {
-    exec.command.join(" ")
+    const MAX_LEN: usize = 40;
+    let mut parts = exec.command.iter();
+    let first = match parts.next() {
+        Some(s) => Path::new(s).file_name().unwrap_or(s.as_ref()).to_string_lossy(),
+        None => return String::new(),
+    };
+    let mut out = first.into_owned();
+    for arg in parts {
+        out.push(' ');
+        out.push_str(arg);
+    }
+    if out.len() > MAX_LEN {
+        out.truncate(MAX_LEN - 1);
+        out.push('…');
+    }
+    out
 }
 
 struct WsFields {

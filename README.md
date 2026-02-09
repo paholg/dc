@@ -18,6 +18,24 @@ without interrupting your workflow.
 
 ## Installation
 
+After install, I recommend you place the following in your shell. It currently
+does nothing, but will eventually provide completions and other goodies.
+
+**Bash**:
+```bash
+souce <(dc setup-shell bash)
+```
+
+**Fish**:
+```fish
+dc setup-shell fish | source
+```
+
+**Zsh**:
+```zsh
+source <(dc setup-shell zsh)
+```
+
 ## Configuration
 
 In order to give you a nice experience, we require a very simple confuration

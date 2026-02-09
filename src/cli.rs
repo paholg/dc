@@ -9,6 +9,7 @@ mod fwd;
 mod kill;
 mod list;
 mod prune;
+mod setup_shell;
 pub(crate) mod up;
 
 const ABOUT: &str = "TODO";
@@ -30,6 +31,7 @@ impl Cli {
             Commands::Prune(prune) => prune.run(docker, config).await,
             Commands::Kill(kill) => kill.run(docker, config).await,
             Commands::Copy(copy) => copy.run(docker, config).await,
+            Commands::SetupShell(setup_shell) => setup_shell.run(),
         }
     }
 }
@@ -58,4 +60,6 @@ pub enum Commands {
     Kill(kill::Kill),
     #[command()]
     Copy(copy::Copy),
+    #[command(hide = true)]
+    SetupShell(setup_shell::SetupShell),
 }

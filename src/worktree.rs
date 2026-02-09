@@ -18,9 +18,8 @@ pub async fn create(repo_path: &Path, workspace_dir: &Path, name: &str) -> eyre:
     }
 
     let status = Command::new("git")
-        .args(["worktree", "add", "--detach"])
+        .args(["worktree", "add"])
         .arg(&worktree_path)
-        .arg("HEAD")
         .current_dir(repo_path)
         .stdout(Stdio::null())
         .status()

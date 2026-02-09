@@ -115,7 +115,7 @@ pub(crate) fn compose_project_name(worktree_path: &Path) -> String {
         .file_name()
         .unwrap_or_default()
         .to_string_lossy();
-    let raw = format!("dc-{basename}");
+    let raw = format!("{basename}_devcontainer");
     raw.to_lowercase()
         .chars()
         .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')

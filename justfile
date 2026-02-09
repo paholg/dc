@@ -30,7 +30,7 @@ release version:
     git tag v{{version}}
     git push
     git push --tags
-    
+
 schema: schema-gen schema-open
 
 schema-gen:

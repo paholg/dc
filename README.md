@@ -1,5 +1,8 @@
 # dc - a worktree aware devcontainer manager
 
+**NOTE:** This is brand new, experimental software. It is missing many features
+of devcontainers, and likely has bugs, Use at your own risk!
+
 Git worktrees allow you to have multiple branches checked out at the same time
 in different directories.
 

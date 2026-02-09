@@ -4,7 +4,9 @@ use std::path::{Path, PathBuf};
 use bollard::Docker;
 use bollard::models::ContainerSummaryStateEnum;
 use bollard::query_parameters::{ListContainersOptions, StatsOptions};
+use eyre::eyre;
 use futures::StreamExt;
+use nucleo_picker::{Picker, Render};
 use tabular::{Row, Table};
 use tokio::process::Command;
 
@@ -232,6 +234,52 @@ pub fn picker_items(workspaces: Vec<Workspace>) -> Vec<PickerItem> {
 pub struct PickerItem {
     pub workspace: Workspace,
     pub rendered: String,
+}
+
+struct PickerItemRenderer;
+
+impl Render<PickerItem> for PickerItemRenderer {
+    type Str<'a> = &'a str;
+
+    fn render<'a>(&self, item: &'a PickerItem) -> Self::Str<'a> {
+        &item.rendered
+    }
+}
+
+pub fn pick_workspace(workspaces: Vec<Workspace>) -> eyre::Result<(PathBuf, String, String)> {
+    match workspaces.len() {
+        0 => Err(eyre!("no running workspaces found")),
+        1 => {
+            let ws = workspaces.into_iter().next().unwrap();
+            let cid = ws
+                .container_ids
+                .into_iter()
+                .next()
+                .ok_or_else(|| eyre!("no containers for workspace"))?;
+            let project = ws.project.clone();
+            Ok((ws.path, cid, project))
+        }
+        _ => {
+            let items = picker_items(workspaces);
+            let mut picker = Picker::new(PickerItemRenderer);
+            let injector = picker.injector();
+            for item in items {
+                injector.push(item);
+            }
+            let item = picker
+                .pick()
+                .map_err(|e| eyre!("{e}"))?
+                .ok_or_else(|| eyre!("no workspace selected"))?;
+            let cid = item
+                .workspace
+                .container_ids
+                .first()
+                .cloned()
+                .ok_or_else(|| eyre!("no containers for workspace"))?;
+            let project = item.workspace.project.clone();
+            Ok((item.workspace.path.clone(), cid, project))
+        }
+    }
 }
 
 // Phase 1: Docker discovery

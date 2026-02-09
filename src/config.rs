@@ -50,6 +50,9 @@ pub struct ProjectOptions {
     /// If set, this port will be used automatically by the `dc fwd` command, to
     /// map a static host port to the container of your choice.
     pub fwd_port: Option<u16>,
+
+    /// Port inside the container to forward to. Defaults to `fwd_port` if unset.
+    pub container_port: Option<u16>,
 }
 
 impl ProjectOptions {
@@ -66,6 +69,9 @@ impl ProjectOptions {
         }
         if overrides.fwd_port.is_some() {
             self.fwd_port = overrides.fwd_port;
+        }
+        if overrides.container_port.is_some() {
+            self.container_port = overrides.container_port;
         }
     }
 }

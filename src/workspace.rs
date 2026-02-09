@@ -348,10 +348,10 @@ async fn git_worktrees(repo_path: &Path, workspace_dir: &Path) -> eyre::Result<V
 }
 
 // Phase 3a: docker stats (one request per container via bollard stream)
-async fn docker_stats(docker: &Docker, container_ids: &[String]) -> HashMap<String, Stats> {
+async fn docker_stats(docker: &Docker, container_ids: &[String]) -> eyre::Result<HashMap<String, Stats>> {
     let mut map = HashMap::new();
     if container_ids.is_empty() {
-        return map;
+        return Ok(map);
     }
 
     for id in container_ids {
@@ -362,19 +362,23 @@ async fn docker_stats(docker: &Docker, container_ids: &[String]) -> HashMap<Stri
                 one_shot: true,
             }),
         );
-        if let Some(Ok(stats)) = stream.next().await {
-            let ram = stats
-                .memory_stats
-                .as_ref()
-                .and_then(|m| m.usage)
-                .unwrap_or(0);
+        match stream.next().await {
+            Some(Ok(stats)) => {
+                let ram = stats
+                    .memory_stats
+                    .as_ref()
+                    .and_then(|m| m.usage)
+                    .unwrap_or(0);
 
-            let cpu = compute_cpu_percent(&stats);
+                let cpu = compute_cpu_percent(&stats);
 
-            map.insert(id.clone(), Stats { ram, cpu });
+                map.insert(id.clone(), Stats { ram, cpu });
+            }
+            Some(Err(e)) => return Err(e.into()),
+            None => return Err(eyre!("no stats response for container {id}")),
         }
     }
-    map
+    Ok(map)
 }
 
 fn compute_cpu_percent(stats: &bollard::models::ContainerStatsResponse) -> f32 {
@@ -415,27 +419,21 @@ fn compute_cpu_percent(stats: &bollard::models::ContainerStatsResponse) -> f32 {
 async fn detect_execs(
     docker: &Docker,
     container_ids: &[String],
-) -> HashMap<String, Vec<ExecSession>> {
+) -> eyre::Result<HashMap<String, Vec<ExecSession>>> {
     let mut result: HashMap<String, Vec<ExecSession>> = HashMap::new();
     if container_ids.is_empty() {
-        return result;
+        return Ok(result);
     }
 
     for cid in container_ids {
-        let info = match docker.inspect_container(cid, None).await {
-            Ok(info) => info,
-            Err(_) => continue,
-        };
+        let info = docker.inspect_container(cid, None).await?;
         let exec_ids = match info.exec_ids {
             Some(ids) if !ids.is_empty() => ids,
             _ => continue,
         };
 
         for eid in &exec_ids {
-            let exec = match docker.inspect_exec(eid).await {
-                Ok(e) => e,
-                Err(_) => continue,
-            };
+            let exec = docker.inspect_exec(eid).await?;
             if exec.running != Some(true) {
                 continue;
             }
@@ -456,7 +454,7 @@ async fn detect_execs(
         }
     }
 
-    result
+    Ok(result)
 }
 
 async fn list_with_filter(
@@ -501,17 +499,13 @@ async fn list_with_filter(
     };
 
     for (proj_name, project) in &projects_to_scan {
-        let workspace_dir = DevContainer::load(&project)
-            .and_then(|dc| Ok(dc.common.customizations.dc.workspace_dir()))
-            .unwrap_or_else(|_| PathBuf::from("/tmp/"));
-        if let Ok(worktrees) = git_worktrees(&project.path, &workspace_dir).await {
-            for wt in worktrees {
-                groups.entry(wt).or_insert_with(|| WorktreeGroup {
-                    project: proj_name.to_string(),
-                    container_ids: Vec::new(),
-                    states: Vec::new(),
-                });
-            }
+        let workspace_dir = DevContainer::load(&project)?.common.customizations.dc.workspace_dir();
+        for wt in git_worktrees(&project.path, &workspace_dir).await? {
+            groups.entry(wt).or_insert_with(|| WorktreeGroup {
+                project: proj_name.to_string(),
+                container_ids: Vec::new(),
+                states: Vec::new(),
+            });
         }
     }
 
@@ -521,20 +515,20 @@ async fn list_with_filter(
         .flat_map(|g| g.container_ids.iter().cloned())
         .collect();
 
-    let stats_map = docker_stats(docker, &all_container_ids).await;
-    let mut execs_map = detect_execs(docker, &all_container_ids).await;
+    let stats_map = docker_stats(docker, &all_container_ids).await?;
+    let mut execs_map = detect_execs(docker, &all_container_ids).await?;
 
     let mut workspaces = Vec::new();
     for (path, group) in groups {
         // dirty check
         let dirty = if path.exists() {
-            Command::new("git")
+            !Command::new("git")
                 .args(["status", "--porcelain"])
                 .current_dir(&path)
                 .output()
-                .await
-                .map(|o| !o.stdout.is_empty())
-                .unwrap_or(false)
+                .await?
+                .stdout
+                .is_empty()
         } else {
             false
         };

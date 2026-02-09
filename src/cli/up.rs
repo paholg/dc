@@ -23,7 +23,7 @@ pub struct Up {
     )]
     project: Option<String>,
 
-    #[arg(help = "name of new workspace [default: One will be generated]")]
+    #[arg(help = "name of new workspace [default: Root workspace]")]
     name: Option<PathBuf>,
 
     #[arg(
@@ -50,24 +50,20 @@ impl Up {
 
         let dc = DevContainer::load(project)?;
         let dc_options = &dc.common.customizations.dc;
-        let workspace_dir = dc_options.workspace_dir();
 
-        let ws_name = self
-            .name
-            .map(|p| p.to_string_lossy().into_owned())
-            .unwrap_or_else(|| worktree::generate_name(name));
-
-        let worktree_path = worktree::create(&project.path, &workspace_dir, &ws_name).await?;
+        let worktree_path = match self.name {
+            Some(ref ws_name) => {
+                let workspace_dir = dc_options.workspace_dir();
+                let ws_name = ws_name.to_string_lossy();
+                worktree::create(&project.path, &workspace_dir, &ws_name).await?
+            }
+            None => project.path.clone(),
+        };
 
         let crate::devcontainer::Kind::Compose(ref compose) = dc.kind else {
             // This was handled at deserialize time already.
             panic!();
         };
-
-        // initializeCommand runs on the host, from the worktree
-        if let Some(ref cmd) = dc.common.initialize_command {
-            runner::run("initializeCommand", cmd, Some(&worktree_path)).await?;
-        }
 
         let config_file = worktree_path
             .join(".devcontainer")
@@ -75,24 +71,36 @@ impl Up {
         let override_file =
             write_compose_override(compose, &dc.common, &worktree_path, &config_file, name)?;
 
+        // Check if the primary container already exists (re-up vs fresh creation)
+        let _already_running = compose_ps_q(compose, &worktree_path, &override_file)
+            .await
+            .is_ok();
+
+        // initializeCommand runs on the host, from the worktree
+        if let Some(ref cmd) = dc.common.initialize_command {
+            runner::run("initializeCommand", cmd, Some(&worktree_path)).await?;
+        }
+
         if let Some(ref copy_args) = self.copy {
-            let volumes = if !copy_args.is_empty() {
-                copy_args.clone()
-            } else {
-                dc.common
-                    .customizations
-                    .dc
-                    .default_copy_volumes
-                    .clone()
-                    .ok_or_else(|| {
-                        eyre!("no volumes specified and no defaultCopyVolumes configured")
-                    })?
-            };
+            if self.name.is_some() {
+                let volumes = if !copy_args.is_empty() {
+                    copy_args.clone()
+                } else {
+                    dc.common
+                        .customizations
+                        .dc
+                        .default_copy_volumes
+                        .clone()
+                        .ok_or_else(|| {
+                            eyre!("no volumes specified and no defaultCopyVolumes configured")
+                        })?
+                };
 
-            let root_project = compose_project_name(&project.path);
-            let new_project = compose_project_name(&worktree_path);
+                let root_project = compose_project_name(&project.path);
+                let new_project = compose_project_name(&worktree_path);
 
-            copy_volumes(docker, &volumes, &root_project, &new_project).await?;
+                copy_volumes(docker, &volumes, &root_project, &new_project).await?;
+            }
         }
 
         compose_up(compose, &worktree_path, &override_file).await?;
@@ -102,7 +110,8 @@ impl Up {
         let workdir = Some(compose.workspace_folder.as_path());
         let remote_env = &dc.common.remote_env;
 
-        // Lifecycle commands in the container
+        // Lifecycle commands: create-only commands run only on first creation
+        // For now, though, we always recreate.
         if let Some(ref cmd) = dc.common.on_create_command {
             cmd.run_in_container("onCreateCommand", &container_id, user, workdir, remote_env)
                 .await?;

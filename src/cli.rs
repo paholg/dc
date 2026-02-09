@@ -13,7 +13,7 @@ pub(crate) mod up;
 const ABOUT: &str = "TODO";
 
 #[derive(Debug, Parser)]
-#[command(version, about = ABOUT, flatten_help = true)]
+#[command(version, about = ABOUT, flatten_help = false)]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Commands,
@@ -22,7 +22,7 @@ pub struct Cli {
 impl Cli {
     pub async fn run(self, docker: &Docker, config: &Config) -> eyre::Result<()> {
         match self.command {
-            Commands::Up(up) => up.run(config).await,
+            Commands::Up(up) => up.run(docker, config).await,
             Commands::Exec(exec) => exec.run(docker, config).await,
             Commands::Fwd(fwd) => fwd.run(docker, config).await,
             Commands::List(list) => list.run(docker, config).await,

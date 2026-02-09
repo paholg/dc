@@ -1,10 +1,12 @@
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 
+use bollard::Docker;
 use clap::Args;
 use eyre::eyre;
 use serde_json::json;
 
+use crate::cli::copy::copy_volumes;
 use crate::config::Config;
 use crate::devcontainer::{Common, Compose, DevContainer};
 use crate::runner;
@@ -21,7 +23,7 @@ pub struct Up {
     )]
     project: Option<String>,
 
-    #[arg(help = "name of new workspace, leave blank for it to be generated")]
+    #[arg(help = "name of new workspace [default: One will be generated]")]
     name: Option<PathBuf>,
 
     #[arg(
@@ -29,13 +31,21 @@ pub struct Up {
         long,
         num_args = 0..,
         allow_hyphen_values = true,
-        help = "exec into it once up with the given command, or leave blank to run your default shell"
+        help = "exec into it once up with the given command [default: conigured defaultExec]"
     )]
     exec: Option<Vec<String>>,
+
+    #[arg(
+        short = 'c',
+        long,
+        num_args = 0..,
+        help = "copy named volumes from root workspace [default: configured defaultCopyVolumes]"
+    )]
+    copy: Option<Vec<String>>,
 }
 
 impl Up {
-    pub async fn run(self, config: &Config) -> eyre::Result<()> {
+    pub async fn run(self, docker: &Docker, config: &Config) -> eyre::Result<()> {
         let (name, project) = config.project(self.project.as_deref())?;
 
         let dc = DevContainer::load(&project)?;
@@ -64,6 +74,26 @@ impl Up {
             .join("devcontainer.json");
         let override_file =
             write_compose_override(compose, &dc.common, &worktree_path, &config_file, name)?;
+
+        if let Some(ref copy_args) = self.copy {
+            let volumes = if !copy_args.is_empty() {
+                copy_args.clone()
+            } else {
+                dc.common
+                    .customizations
+                    .dc
+                    .default_copy_volumes
+                    .clone()
+                    .ok_or_else(|| {
+                        eyre!("no volumes specified and no defaultCopyVolumes configured")
+                    })?
+            };
+
+            let root_project = compose_project_name(&project.path);
+            let new_project = compose_project_name(&worktree_path);
+
+            copy_volumes(docker, &volumes, &root_project, &new_project).await?;
+        }
 
         compose_up(compose, &worktree_path, &override_file).await?;
 

@@ -1,4 +1,5 @@
 use std::io::Write;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use indicatif::ProgressStyle;
 use jiff::fmt::friendly::SpanPrinter;
@@ -44,6 +45,7 @@ struct SpanTiming {
     label: Option<String>,
     message: Option<String>,
     start: Zoned,
+    entered: AtomicBool,
 }
 
 struct DcLayer {
@@ -67,6 +69,7 @@ impl<S: Subscriber + for<'a> LookupSpan<'a>> Layer<S> for DcLayer {
             label: visitor.label,
             message: visitor.message,
             start: Zoned::now(),
+            entered: AtomicBool::new(false),
         });
     }
 
@@ -76,6 +79,10 @@ impl<S: Subscriber + for<'a> LookupSpan<'a>> Layer<S> for DcLayer {
         let Some(timing) = extensions.get::<SpanTiming>() else {
             return;
         };
+
+        if timing.entered.swap(true, Ordering::Relaxed) {
+            return;
+        }
 
         let ts = ts(&Zoned::now());
         let mut line = format!("{GRAY}{ts}{RESET}");

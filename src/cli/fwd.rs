@@ -7,6 +7,7 @@ use clap::Args;
 use eyre::eyre;
 use tokio::io::copy_bidirectional;
 use tokio::net::{TcpListener, TcpStream};
+use tracing::trace;
 
 /// Forward a local TCP port to a running devcontainer
 ///
@@ -49,7 +50,8 @@ impl Fwd {
             (cid, ws.project, ws_name)
         } else {
             let mut workspaces =
-                Workspace::list_project(docker, self.project.as_deref(), config, Speed::Fast).await?;
+                Workspace::list_project(docker, self.project.as_deref(), config, Speed::Fast)
+                    .await?;
             workspaces.retain(|ws| ws.status == ContainerSummaryStateEnum::RUNNING);
             let (path, cid, project) = crate::workspace::pick_workspace(workspaces)?;
             let ws_name = path
@@ -91,7 +93,7 @@ impl Fwd {
             .ok_or_else(|| eyre!("container has no IP address"))?;
 
         let listener = TcpListener::bind(format!("127.0.0.1:{host_port}")).await?;
-        eprintln!("{ws_name}: forwarding 127.0.0.1:{host_port} -> {ip}:{container_port}");
+        trace!("{ws_name}: forwarding 127.0.0.1:{host_port} -> {ip}:{container_port}");
 
         loop {
             let (mut local, _addr) = listener.accept().await?;
@@ -102,7 +104,7 @@ impl Fwd {
                         let _ = copy_bidirectional(&mut local, &mut remote).await;
                     }
                     Err(e) => {
-                        eprintln!("failed to connect to {dest}: {e}");
+                        trace!("failed to connect to {dest}: {e}");
                     }
                 }
             });

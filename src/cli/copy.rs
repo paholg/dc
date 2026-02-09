@@ -1,3 +1,6 @@
+use std::borrow::Cow;
+use std::path::Path;
+
 use bollard::Docker;
 use bollard::models::{ContainerCreateBody, HostConfig};
 use bollard::query_parameters::{
@@ -9,6 +12,7 @@ use futures::StreamExt;
 
 use crate::config::Config;
 use crate::devcontainer::DevContainer;
+use crate::runner::Runnable;
 use crate::workspace::Speed::Fast;
 use crate::workspace::{Workspace, pick_workspace_any};
 
@@ -71,14 +75,71 @@ impl Copy {
                 .ok_or_else(|| eyre!("no volumes specified and no defaultCopyVolumes configured"))?
         };
 
-        for vol in &volumes {
-            let src = format!("{}_{vol}", from_ws.compose_project_name);
-            let dst = format!("{}_{vol}", to_ws.compose_project_name);
-            eprintln!("copying {src} -> {dst}");
-            copy_volume(docker, &src, &dst).await?;
-        }
+        copy_volumes(
+            docker,
+            &volumes,
+            &from_ws.compose_project_name,
+            &to_ws.compose_project_name,
+        )
+        .await
+    }
+}
 
-        Ok(())
+pub(crate) async fn copy_volumes(
+    docker: &Docker,
+    volumes: &[String],
+    from_project: &str,
+    to_project: &str,
+) -> eyre::Result<()> {
+    let batch = CopyVolumes::new(docker, volumes, from_project, to_project);
+    crate::runner::run("copy volumes", &batch, None).await
+}
+
+struct CopyVolume<'a> {
+    docker: &'a Docker,
+    name: String,
+    src: String,
+    dst: String,
+}
+
+struct CopyVolumes<'a> {
+    copies: Vec<CopyVolume<'a>>,
+}
+
+impl<'a> CopyVolumes<'a> {
+    fn new(docker: &'a Docker, volumes: &[String], from_project: &str, to_project: &str) -> Self {
+        let copies = volumes
+            .iter()
+            .map(|vol| CopyVolume {
+                docker,
+                name: vol.clone(),
+                src: format!("{from_project}_{vol}"),
+                dst: format!("{to_project}_{vol}"),
+            })
+            .collect();
+        Self { copies }
+    }
+}
+
+impl Runnable for CopyVolume<'_> {
+    fn command(&self) -> Cow<'_, str> {
+        format!("{} -> {}", self.src, self.dst).into()
+    }
+
+    async fn run(&self, _dir: Option<&Path>) -> eyre::Result<()> {
+        do_copy_volume(self.docker, &self.src, &self.dst).await
+    }
+}
+
+impl Runnable for CopyVolumes<'_> {
+    fn command(&self) -> Cow<'_, str> {
+        let names: Vec<_> = self.copies.iter().map(|c| c.name.as_str()).collect();
+        names.join(", ").into()
+    }
+
+    async fn run(&self, _dir: Option<&Path>) -> eyre::Result<()> {
+        let labeled: Vec<_> = self.copies.iter().map(|c| (c.name.as_str(), c)).collect();
+        crate::runner::run_parallel(labeled).await
     }
 }
 
@@ -99,7 +160,7 @@ async fn ensure_image(docker: &Docker) -> eyre::Result<()> {
     Ok(())
 }
 
-async fn copy_volume(docker: &Docker, src: &str, dst: &str) -> eyre::Result<()> {
+async fn do_copy_volume(docker: &Docker, src: &str, dst: &str) -> eyre::Result<()> {
     ensure_image(docker).await?;
     let container = docker
         .create_container(

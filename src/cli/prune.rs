@@ -12,6 +12,7 @@ use crate::workspace::{Speed, Workspace, workspace_table};
 use bollard::Docker;
 use clap::Args;
 use tokio::process::Command;
+use tracing::trace;
 
 #[derive(Debug, Args)]
 pub struct Prune {
@@ -34,11 +35,12 @@ impl Prune {
 
         let worktrees = list_worktrees(&project.path, &dc_options.workspace_dir()).await?;
         if worktrees.is_empty() {
-            println!("Nothing to prune.");
+            trace!("Nothing to prune.");
             return Ok(());
         }
 
-        let workspaces = Workspace::list_project(docker, self.project.as_deref(), config, Speed::Slow).await?;
+        let workspaces =
+            Workspace::list_project(docker, self.project.as_deref(), config, Speed::Slow).await?;
         let ws_map: HashMap<&Path, &Workspace> = workspaces
             .iter()
             .map(|ws| (ws.path.as_path(), ws))

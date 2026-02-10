@@ -62,6 +62,8 @@ impl Up {
             &worktree_path,
             &config_file,
             &state.project_name,
+            dc_options.mount_git,
+            &state.project.path,
         )?;
 
         // Check if the primary container already exists (re-up vs fresh creation)
@@ -179,6 +181,8 @@ fn write_compose_override(
     worktree_path: &Path,
     config_file: &Path,
     project_name: &str,
+    mount_git: bool,
+    project_path: &Path,
 ) -> eyre::Result<PathBuf> {
     let override_path = std::env::temp_dir().join(format!(
         "{}-override.yml",
@@ -214,6 +218,12 @@ fn write_compose_override(
     }
     if let Some(ref user) = common.container_user {
         service_obj["user"] = json!(user);
+    }
+
+    if mount_git && worktree_path != project_path {
+        let git_dir = project_path.join(".git");
+        let mount = format!("{}:{}", git_dir.display(), git_dir.display());
+        service_obj["volumes"] = json!([mount]);
     }
 
     if compose.override_command {

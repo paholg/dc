@@ -12,7 +12,14 @@ async fn main() -> eyre::Result<()> {
 
     dc::subscriber::init_subscriber();
 
-    let cli = Cli::parse();
+    let cli = match Cli::try_parse() {
+        Ok(cli) => cli,
+        Err(e) => {
+            // Ensure help/version/error output goes to stderr, not stdout
+            eprintln!("{}", e.render().ansi());
+            std::process::exit(e.exit_code());
+        }
+    };
     let docker = dc::preflight::check().await?;
     let config = Config::load()?;
     cli.run(&docker, &config).await

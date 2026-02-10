@@ -157,7 +157,7 @@ impl Fwd {
 
         docker.start_container(&sidecar_name, None).await?;
 
-        println!(
+        eprintln!(
             "Forwarding 127.0.0.1:{host_port} -> {ip}:{container_port} (sidecar: {sidecar_name})"
         );
 

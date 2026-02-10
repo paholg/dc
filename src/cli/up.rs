@@ -338,7 +338,7 @@ pub(crate) fn exec_interactive(
 
     // Restore cursor visibility — indicatif hides it for spinners and exec()
     // replaces the process before indicatif's cleanup can run.
-    let _ = crossterm::execute!(std::io::stdout(), crossterm::cursor::Show);
+    let _ = crossterm::execute!(std::io::stderr(), crossterm::cursor::Show);
 
     Err(std::process::Command::new("docker")
         .args(&args)

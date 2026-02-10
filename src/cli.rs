@@ -15,7 +15,7 @@ pub(crate) mod up;
 const ABOUT: &str = "TODO";
 
 #[derive(Debug, Parser)]
-#[command(version, about = ABOUT, flatten_help = false)]
+#[command(version, about = ABOUT)]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Commands,

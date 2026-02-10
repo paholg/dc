@@ -42,26 +42,26 @@ impl Prune {
         }
 
         if !in_use.is_empty() {
-            println!("{GREEN}In Use{RESET} ({CYAN}skipping{RESET}):");
-            print!("{}", workspace_table(in_use.iter().copied())?);
-            println!();
+            eprintln!("{GREEN}In Use{RESET} ({CYAN}skipping{RESET}):");
+            eprint!("{}", workspace_table(in_use.iter().copied())?);
+            eprintln!();
         }
         if !dirty.is_empty() {
-            println!("{RED}Dirty{RESET} ({CYAN}skipping{RESET}):");
-            print!("{}", workspace_table(dirty.iter().copied())?);
-            println!();
+            eprintln!("{RED}Dirty{RESET} ({CYAN}skipping{RESET}):");
+            eprint!("{}", workspace_table(dirty.iter().copied())?);
+            eprintln!();
         }
 
         if to_clean.is_empty() {
             return Ok(());
         }
 
-        println!("{YELLOW}Will Remove - DATA WILL BE LOST{RESET}:");
-        print!("{}", workspace_table(to_clean.iter().copied())?);
-        println!();
+        eprintln!("{YELLOW}Will Remove - DATA WILL BE LOST{RESET}:");
+        eprint!("{}", workspace_table(to_clean.iter().copied())?);
+        eprintln!();
 
         if !self.yes && !confirm()? {
-            println!("Aborted.");
+            eprintln!("Aborted.");
             return Ok(());
         }
 
@@ -170,14 +170,14 @@ impl Runnable for Cleanup<'_> {
             eyre::ensure!(status.success(), "git worktree remove failed");
         }
 
-        println!("Removed {}", self.path.display());
+        eprintln!("Removed {}", self.path.display());
         Ok(())
     }
 }
 
 pub(super) fn confirm() -> eyre::Result<bool> {
-    print!("Proceed? [y/N] ");
-    std::io::stdout().flush()?;
+    eprint!("Proceed? [y/N] ");
+    std::io::stderr().flush()?;
     let mut line = String::new();
     std::io::stdin().lock().read_line(&mut line)?;
     Ok(line.trim().eq_ignore_ascii_case("y"))

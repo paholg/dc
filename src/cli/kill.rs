@@ -43,9 +43,11 @@ impl Kill {
         }
 
         if is_root {
-            println!("{YELLOW}Will destroy {RED}root{YELLOW} workspace — DATA WILL BE LOST{RESET}",);
+            eprintln!(
+                "{YELLOW}Will destroy {RED}root{YELLOW} workspace — DATA WILL BE LOST{RESET}",
+            );
             if !confirm()? {
-                println!("Aborted.");
+                eprintln!("Aborted.");
                 return Ok(());
             }
         }

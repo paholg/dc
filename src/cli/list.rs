@@ -15,7 +15,7 @@ impl List {
     pub async fn run(self, docker: &Docker, config: &Config) -> eyre::Result<()> {
         let project = self.project.as_deref();
         let workspaces = Workspace::list_project(docker, project, config, Speed::Slow).await?;
-        print!("{}", workspace_table(&workspaces)?);
+        eprint!("{}", workspace_table(&workspaces)?);
         Ok(())
     }
 }

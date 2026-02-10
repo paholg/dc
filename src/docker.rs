@@ -92,7 +92,10 @@ impl DockerClient {
                     .memory_stats
                     .as_ref()
                     .and_then(|m| m.usage)
-                    .ok_or_else(|| eyre!("missing memory stats for container {container_id}"))?;
+                    .unwrap_or_else(|| {
+                        tracing::warn!("missing memory stats for container {container_id}");
+                        0
+                    });
                 Ok(Stats { ram })
             }
             Some(Err(e)) => Err(e.into()),

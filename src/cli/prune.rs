@@ -5,13 +5,13 @@ use std::path::Path;
 
 use crate::ansi::{CYAN, GREEN, RED, RESET, YELLOW};
 use crate::cli::State;
+use crate::run::pty::run_in_pty;
 use crate::run::{self, Runnable, Runner};
 use crate::workspace::Workspace;
 use crate::workspace::table::workspace_table;
 use bollard::Docker;
 use bollard::query_parameters::{ListContainersOptions, RemoveContainerOptions};
 use clap::Args;
-use tokio::process::Command;
 
 #[derive(Debug, Args)]
 pub struct Prune;
@@ -87,7 +87,10 @@ pub(super) struct Cleanup<'a> {
 
 impl Runnable for Cleanup<'_> {
     fn name(&self) -> Cow<'_, str> {
-        self.path.display().to_string().into()
+        self.path
+            .file_name()
+            .map(|n| n.to_string_lossy())
+            .unwrap_or(self.path.display().to_string().into())
     }
 
     fn description(&self) -> Cow<'_, str> {
@@ -95,19 +98,19 @@ impl Runnable for Cleanup<'_> {
     }
 
     async fn run(self, _: run::Token) -> eyre::Result<()> {
-        let down_result = Command::new("docker")
-            .args([
+        run_in_pty(
+            &[
+                "docker",
                 "compose",
                 "-p",
                 &self.compose_name,
                 "down",
                 "-v",
                 "--remove-orphans",
-            ])
-            .status()
-            .await;
-
-        down_result?;
+            ],
+            None,
+        )
+        .await?;
 
         let override_file =
             std::env::temp_dir().join(format!("{}-override.yml", self.compose_name));
@@ -147,19 +150,14 @@ impl Runnable for Cleanup<'_> {
         }
 
         if self.remove_worktree {
-            let mut args = vec!["worktree", "remove"];
+            let mut args = vec!["git", "worktree", "remove"];
             if self.force {
                 args.push("--force");
             }
             let path_str = self.path.to_string_lossy();
             args.push(&path_str);
 
-            let status = Command::new("git")
-                .args(&args)
-                .current_dir(self.repo_path)
-                .status()
-                .await?;
-            eyre::ensure!(status.success(), "git worktree remove failed");
+            run_in_pty(&args, Some(self.repo_path)).await?;
         }
 
         eprintln!("Removed {}", self.path.display());

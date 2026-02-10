@@ -1,7 +1,9 @@
 use std::path::{Path, PathBuf};
-use std::process::{Output, Stdio};
+use std::process::Output;
 
 use tokio::process::Command;
+
+use crate::run::pty::run_in_pty;
 
 pub async fn create(repo_path: &Path, workspace_dir: &Path, name: &str) -> eyre::Result<PathBuf> {
     // Validate it's a git repo
@@ -11,15 +13,9 @@ pub async fn create(repo_path: &Path, workspace_dir: &Path, name: &str) -> eyre:
     if worktree_path.exists() {
         return Ok(worktree_path);
     }
+    let path = worktree_path.to_string_lossy();
 
-    let status = Command::new("git")
-        .args(["worktree", "add"])
-        .arg(&worktree_path)
-        .current_dir(repo_path)
-        .stdout(Stdio::null())
-        .status()
-        .await?;
-    eyre::ensure!(status.success(), "git worktree add failed");
+    run_in_pty(&["git", "worktree", "add", &path], Some(repo_path)).await?;
 
     Ok(worktree_path)
 }

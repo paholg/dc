@@ -8,7 +8,7 @@ use serde_with::{OneOrMany, serde_as};
 pub mod lifecycle_command;
 mod unsupported;
 
-use crate::{config::Project, runner::cmd::Cmd};
+use crate::{config::Project, run::cmd::Cmd};
 use lifecycle_command::LifecycleCommand;
 use unsupported::Unsupported;
 

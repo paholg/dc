@@ -9,8 +9,8 @@ use serde_json::json;
 use crate::cli::copy::copy_volumes;
 use crate::config::Config;
 use crate::devcontainer::{Common, Compose, DevContainer};
-use crate::runner;
-use crate::runner::cmd::Cmd;
+use crate::run::Runner;
+use crate::run::cmd::{Cmd, NamedCmd};
 use crate::worktree;
 
 /// Spin up a devcontainer
@@ -78,7 +78,8 @@ impl Up {
 
         // initializeCommand runs on the host, from the worktree
         if let Some(ref cmd) = dc.common.initialize_command {
-            runner::run("initializeCommand", cmd, Some(&worktree_path)).await?;
+            cmd.run_on_host("initializeCommand", Some(&worktree_path))
+                .await?;
         }
 
         if let Some(ref copy_args) = self.copy
@@ -275,8 +276,12 @@ async fn compose_up(
         args.extend(to_start);
     }
 
-    let cmd = crate::runner::cmd::Cmd::Args(args);
-    runner::run("docker compose up", &cmd, None).await
+    let cmd = NamedCmd {
+        name: "docker compose up",
+        cmd: &Cmd::Args(args),
+        dir: None,
+    };
+    Runner::run(cmd).await
 }
 
 async fn compose_ps_q(

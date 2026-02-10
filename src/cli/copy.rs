@@ -1,5 +1,4 @@
 use std::borrow::Cow;
-use std::path::Path;
 
 use bollard::Docker;
 use bollard::models::{ContainerCreateBody, HostConfig};
@@ -12,7 +11,7 @@ use futures::StreamExt;
 
 use crate::config::Config;
 use crate::devcontainer::DevContainer;
-use crate::runner::Runnable;
+use crate::run::{Runnable, Runner};
 use crate::workspace::Speed::Fast;
 use crate::workspace::{Workspace, pick_workspace_any};
 
@@ -91,8 +90,14 @@ pub(crate) async fn copy_volumes(
     from_project: &str,
     to_project: &str,
 ) -> eyre::Result<()> {
-    let batch = CopyVolumes::new(docker, volumes, from_project, to_project);
-    crate::runner::run("copy volumes", &batch, None).await
+    let copies = volumes.iter().map(|vol| CopyVolume {
+        docker,
+        name: vol.clone(),
+        src: format!("{from_project}_{vol}"),
+        dst: format!("{to_project}_{vol}"),
+    });
+
+    Runner::run_parallel("copy volumes", copies).await
 }
 
 struct CopyVolume<'a> {
@@ -102,48 +107,17 @@ struct CopyVolume<'a> {
     dst: String,
 }
 
-struct CopyVolumes<'a> {
-    copies: Vec<CopyVolume<'a>>,
-}
-
-impl<'a> CopyVolumes<'a> {
-    fn new(docker: &'a Docker, volumes: &[String], from_project: &str, to_project: &str) -> Self {
-        let copies = volumes
-            .iter()
-            .map(|vol| CopyVolume {
-                docker,
-                name: vol.clone(),
-                src: format!("{from_project}_{vol}"),
-                dst: format!("{to_project}_{vol}"),
-            })
-            .collect();
-        Self { copies }
-    }
-}
-
 impl Runnable for CopyVolume<'_> {
-    fn command(&self) -> Cow<'_, str> {
+    fn name(&self) -> Cow<'_, str> {
+        (&self.name).into()
+    }
+
+    fn description(&self) -> Cow<'_, str> {
         format!("{} -> {}", self.src, self.dst).into()
     }
 
-    async fn run(&self, _dir: Option<&Path>) -> eyre::Result<()> {
+    async fn run(self, _: crate::run::Token) -> eyre::Result<()> {
         do_copy_volume(self.docker, &self.src, &self.dst).await
-    }
-}
-
-impl Runnable for CopyVolumes<'_> {
-    fn command(&self) -> Cow<'_, str> {
-        let names: Vec<_> = self.copies.iter().map(|c| c.name.as_str()).collect();
-        names.join(", ").into()
-    }
-
-    async fn run(&self, _dir: Option<&Path>) -> eyre::Result<()> {
-        let labeled: Vec<_> = self
-            .copies
-            .iter()
-            .map(|c| (c.name.as_str().into(), c))
-            .collect();
-        crate::runner::run_parallel(labeled).await
     }
 }
 

@@ -5,7 +5,7 @@ use std::path::Path;
 
 use crate::ansi::{CYAN, GREEN, RED, RESET, YELLOW};
 use crate::config::Config;
-use crate::runner::{self, Runnable};
+use crate::run::{self, Runnable, Runner};
 use crate::workspace::{Speed, Workspace, workspace_table};
 use bollard::Docker;
 use bollard::query_parameters::{ListContainersOptions, RemoveContainerOptions};
@@ -79,35 +79,8 @@ impl Prune {
                 })
             })
             .collect::<eyre::Result<Vec<_>>>()?;
-        let cleanups = CleanupMany { cleanups };
-        runner::run("", &cleanups, None).await?;
 
-        Ok(())
-    }
-}
-
-struct CleanupMany<'a> {
-    cleanups: Vec<Cleanup<'a>>,
-}
-
-impl Runnable for CleanupMany<'_> {
-    fn command(&self) -> Cow<'_, str> {
-        let paths = self
-            .cleanups
-            .iter()
-            .map(|c| c.path.display().to_string())
-            .collect::<Vec<_>>();
-
-        paths.join(", ").into()
-    }
-
-    async fn run(&self, _dir: Option<&Path>) -> eyre::Result<()> {
-        let labeled: Vec<_> = self
-            .cleanups
-            .iter()
-            .map(|c| (c.path.display().to_string().into(), c))
-            .collect();
-        crate::runner::run_parallel(labeled).await
+        Runner::run_parallel("prune", cleanups).await
     }
 }
 
@@ -121,11 +94,15 @@ pub(super) struct Cleanup<'a> {
 }
 
 impl Runnable for Cleanup<'_> {
-    fn command(&self) -> Cow<'_, str> {
+    fn name(&self) -> Cow<'_, str> {
+        self.path.display().to_string().into()
+    }
+
+    fn description(&self) -> Cow<'_, str> {
         format!("prune {}", self.path.display()).into()
     }
 
-    async fn run(&self, _dir: Option<&Path>) -> eyre::Result<()> {
+    async fn run(self, _: run::Token) -> eyre::Result<()> {
         let down_result = Command::new("docker")
             .args([
                 "compose",

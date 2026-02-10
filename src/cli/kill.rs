@@ -1,6 +1,7 @@
 use crate::ansi::{RED, RESET, YELLOW};
 use crate::config::Config;
 use crate::devcontainer::DevContainer;
+use crate::run::Runner;
 use bollard::Docker;
 use clap::Args;
 use eyre::eyre;
@@ -58,8 +59,6 @@ impl Kill {
             force: self.force,
         };
 
-        crate::runner::run(&self.name, &cleanup, None).await?;
-
-        Ok(())
+        Runner::run(cleanup).await
     }
 }

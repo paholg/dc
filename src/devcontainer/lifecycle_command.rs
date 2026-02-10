@@ -1,13 +1,11 @@
-use std::borrow::Cow;
 use std::path::Path;
 
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 
-use crate::runner::Runnable;
-use crate::runner::cmd::Cmd;
-use crate::runner::docker_exec::DockerExec;
-use crate::runner::run_parallel;
+use crate::run::Runner;
+use crate::run::cmd::{Cmd, NamedCmd};
+use crate::run::docker_exec::DockerExec;
 
 #[derive(Deserialize, Serialize, Clone, Debug)]
 #[serde(untagged)]
@@ -17,9 +15,27 @@ pub enum LifecycleCommand {
 }
 
 impl LifecycleCommand {
+    pub async fn run_on_host(&self, name: &str, dir: Option<&Path>) -> eyre::Result<()> {
+        match self {
+            LifecycleCommand::Single(cmd) => {
+                let cmd = NamedCmd { name, cmd, dir };
+                Runner::run(cmd).await
+            }
+            LifecycleCommand::Parallel(map) => {
+                let execs = map.iter().map(|(cmd_name, cmd)| NamedCmd {
+                    name: cmd_name,
+                    cmd,
+                    dir,
+                });
+
+                Runner::run_parallel(name, execs).await
+            }
+        }
+    }
+
     pub async fn run_in_container(
         &self,
-        label: &str,
+        name: &str,
         container: &str,
         user: Option<&str>,
         workdir: Option<&Path>,
@@ -28,54 +44,26 @@ impl LifecycleCommand {
         match self {
             LifecycleCommand::Single(cmd) => {
                 let exec = DockerExec {
+                    name,
                     container,
                     cmd,
                     user,
                     workdir,
                     env,
                 };
-                crate::runner::run(label, &exec, None).await
+                Runner::run(exec).await
             }
             LifecycleCommand::Parallel(map) => {
-                let execs: Vec<_> = map
-                    .iter()
-                    .map(|(label, cmd)| {
-                        (
-                            label.as_str(),
-                            DockerExec {
-                                container,
-                                cmd,
-                                user,
-                                workdir,
-                                env,
-                            },
-                        )
-                    })
-                    .collect();
-                run_parallel(execs.iter().map(|(l, e)| ((*l).into(), e))).await
-            }
-        }
-    }
-}
+                let execs = map.iter().map(|(cmd_name, cmd)| DockerExec {
+                    name: cmd_name,
+                    container,
+                    cmd,
+                    user,
+                    workdir,
+                    env,
+                });
 
-impl Runnable for LifecycleCommand {
-    fn command(&self) -> Cow<'_, str> {
-        match self {
-            LifecycleCommand::Single(cmd) => cmd.command(),
-            LifecycleCommand::Parallel(map) => map
-                .keys()
-                .map(|s| s.as_str())
-                .collect::<Vec<_>>()
-                .join(", ")
-                .into(),
-        }
-    }
-
-    async fn run(&self, dir: Option<&Path>) -> eyre::Result<()> {
-        match self {
-            LifecycleCommand::Single(cmd) => cmd.run(dir).await,
-            LifecycleCommand::Parallel(map) => {
-                run_parallel(map.iter().map(|(l, c)| (l.into(), c))).await
+                Runner::run_parallel(name, execs).await
             }
         }
     }

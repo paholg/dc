@@ -7,7 +7,7 @@ pub mod config;
 pub mod devcontainer;
 pub mod docker;
 pub mod preflight;
-pub mod runner;
+pub mod run;
 pub mod subscriber;
 pub mod workspace;
 pub mod worktree;

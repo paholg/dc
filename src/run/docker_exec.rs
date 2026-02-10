@@ -3,10 +3,11 @@ use std::path::Path;
 
 use indexmap::IndexMap;
 
-use crate::runner::Runnable;
-use crate::runner::cmd::Cmd;
+use crate::run;
+use crate::run::cmd::Cmd;
 
 pub struct DockerExec<'a> {
+    pub name: &'a str,
     pub container: &'a str,
     pub cmd: &'a Cmd,
     pub user: Option<&'a str>,
@@ -14,12 +15,16 @@ pub struct DockerExec<'a> {
     pub env: &'a IndexMap<String, Option<String>>,
 }
 
-impl Runnable for DockerExec<'_> {
-    fn command(&self) -> Cow<'_, str> {
-        self.cmd.command()
+impl run::Runnable for DockerExec<'_> {
+    fn name(&self) -> Cow<'_, str> {
+        self.name.into()
     }
 
-    async fn run(&self, _dir: Option<&Path>) -> eyre::Result<()> {
+    fn description(&self) -> Cow<'_, str> {
+        self.cmd.description()
+    }
+
+    async fn run(self, _: run::Token) -> eyre::Result<()> {
         let workdir_str;
         let mut args: Vec<&str> = vec!["exec"];
         if let Some(u) = self.user {

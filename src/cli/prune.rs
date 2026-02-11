@@ -104,6 +104,8 @@ impl Runnable for Cleanup<'_> {
             &[
                 "docker",
                 "compose",
+                "--progress",
+                "plain",
                 "-p",
                 &self.compose_name,
                 "down",

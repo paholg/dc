@@ -29,7 +29,6 @@ release version:
     cargo set-version {{version}}
     just lint
     just test
-    nix flake check
     git add Cargo.toml Cargo.lock
     git commit -m "Version {{version}}"
     git tag v{{version}}

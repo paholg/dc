@@ -45,7 +45,7 @@ impl Up {
 
         let worktree_path = match self.name {
             Some(ref ws_name) => {
-                let workspace_dir = dc_options.workspace_dir();
+                let workspace_dir = dc_options.workspace_dir(&state.project.path);
                 worktree::create(&state.project.path, &workspace_dir, ws_name).await?
             }
             None => state.project.path.clone(),

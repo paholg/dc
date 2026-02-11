@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use serde_inline_default::serde_inline_default;
@@ -37,7 +37,12 @@ pub struct DcOptions {
 }
 
 impl DcOptions {
-    pub fn workspace_dir(&self) -> PathBuf {
-        self.worktree_folder.clone().unwrap_or("/tmp/".into())
+    pub fn workspace_dir(&self, project_path: &Path) -> PathBuf {
+        let dir = self.worktree_folder.clone().unwrap_or("/tmp/".into());
+        if dir.is_relative() {
+            project_path.join(dir)
+        } else {
+            dir
+        }
     }
 }

@@ -1,4 +1,4 @@
-use std::{fs::File, path::PathBuf};
+use std::path::PathBuf;
 
 use eyre::WrapErr;
 use indexmap::IndexMap;
@@ -69,12 +69,25 @@ impl DevContainer {
             })
             .ok_or_else(|| eyre::eyre!("no devcontainer.json found in {}", dir.display()))?;
 
-        let contents =
-            File::open(&path).wrap_err_with(|| format!("failed to open {}", path.display()))?;
-        let jd = &mut serde_json::Deserializer::from_reader(&contents);
-        let devcontainer: DevContainer = serde_path_to_error::deserialize(jd)
-            .wrap_err_with(|| format!("failed to parse {}", path.display()))?;
-        Ok(devcontainer)
+        // serde's flatten messes with the ability to trace what failed; so we parse the individual
+        // sections separately.
+        let json = std::fs::read_to_string(&path)
+            .wrap_err_with(|| format!("failed to read {}", path.display()))?;
+
+        fn parse<'de, T: Deserialize<'de>>(
+            json: &'de str,
+            label: &str,
+            path: &std::path::Path,
+        ) -> eyre::Result<T> {
+            let jd = &mut serde_json::Deserializer::from_str(json);
+            serde_path_to_error::deserialize(jd)
+                .wrap_err_with(|| format!("failed to parse {label} in {}", path.display()))
+        }
+
+        Ok(DevContainer {
+            common: parse(&json, "common properties", &path)?,
+            kind: parse(&json, "container type properties", &path)?,
+        })
     }
 }
 
@@ -333,14 +346,16 @@ pub struct PortAttributes {
     pub elevate_if_needed: bool,
     #[serde_inline_default(String::from("Application"))]
     pub label: String,
+    #[serde(default)]
     pub protocol: Protocol,
     #[serde(default)]
     pub require_local_port: bool,
 }
 
-#[derive(Deserialize, Serialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Deserialize, Serialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
 #[serde(rename_all = "camelCase")]
 pub enum Protocol {
+    #[default]
     Http,
     Https,
 }

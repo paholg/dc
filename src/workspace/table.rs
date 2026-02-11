@@ -1,7 +1,4 @@
-use std::path::Path;
-
 use bollard::secret::ContainerSummaryStateEnum;
-use eyre::eyre;
 use tabular::{Row, Table};
 
 use crate::{
@@ -10,28 +7,6 @@ use crate::{
 };
 
 const TABLE_SPEC: &str = "{:<}  {:<}  {:>}  {:>}  {:<}";
-
-fn format_exec(exec: &ExecSession) -> String {
-    const MAX_LEN: usize = 40;
-    let mut parts = exec.command.iter();
-    let first = match parts.next() {
-        Some(s) => Path::new(s)
-            .file_name()
-            .unwrap_or(s.as_ref())
-            .to_string_lossy(),
-        None => return String::new(),
-    };
-    let mut out = first.into_owned();
-    for arg in parts {
-        out.push(' ');
-        out.push_str(arg);
-    }
-    if out.len() > MAX_LEN {
-        out.truncate(MAX_LEN - 1);
-        out.push('…');
-    }
-    out
-}
 
 fn format_age(created: Option<i64>) -> String {
     let ts = match created {
@@ -66,76 +41,48 @@ struct WsFields {
     mem: String,
 }
 
-fn ws_fields(ws: &Workspace) -> eyre::Result<WsFields> {
-    let name = ws
-        .path
-        .file_name()
-        .ok_or_else(|| eyre!("workspace path has no filename"))?
-        .to_string_lossy();
+fn ws_fields(ws: &Workspace) -> WsFields {
     let name = if ws.dirty {
-        format!("{name}*")
+        format!("{}*", ws.name)
     } else {
-        name.into_owned()
+        ws.name.clone()
     };
     let status = match ws.status() {
         ContainerSummaryStateEnum::EMPTY => "-".to_string(),
         ref s => s.to_string(),
     };
-    let mem = if ws.stats.ram == 0 {
-        "-".into()
-    } else {
-        format_bytes(ws.stats.ram)
+    let mem = match ws.stats.ram {
+        0 => "-".into(),
+        ram => format_bytes(ram),
     };
-    Ok(WsFields {
+    WsFields {
         name,
         status,
         created: format_age(ws.created()),
         mem,
-    })
+    }
 }
 
-fn ws_rows(ws: &Workspace) -> eyre::Result<Vec<Row>> {
-    let f = ws_fields(ws)?;
-    if ws.execs.is_empty() {
-        return Ok(vec![
-            Row::new()
-                .with_cell(f.name)
-                .with_cell(f.status)
-                .with_cell(f.created)
-                .with_ansi_cell(f.mem)
-                .with_cell("-"),
-        ]);
-    }
-    let mut rows = Vec::with_capacity(ws.execs.len());
-    for (i, exec) in ws.execs.iter().enumerate() {
-        let cmd = format_exec(exec);
-        if i == 0 {
-            rows.push(
-                Row::new()
-                    .with_cell(&f.name)
-                    .with_cell(&f.status)
-                    .with_cell(&f.created)
-                    .with_ansi_cell(&f.mem)
-                    .with_cell(cmd),
-            );
-        } else {
-            rows.push(
-                Row::new()
-                    .with_cell("")
-                    .with_cell("")
-                    .with_cell("")
-                    .with_cell("")
-                    .with_cell(cmd),
-            );
-        }
-    }
-    Ok(rows)
+fn ws_row(ws: &Workspace) -> Row {
+    let f = ws_fields(ws);
+    let execs = if ws.execs.is_empty() {
+        "-".to_string()
+    } else {
+        ws.execs.iter().count().to_string()
+    };
+    Row::new()
+        .with_cell(f.name)
+        .with_cell(f.status)
+        .with_cell(f.created)
+        .with_ansi_cell(f.mem)
+        .with_cell(execs)
 }
 
 /// Full table with header row, for `list` output.
-pub fn workspace_table<'a>(
-    workspaces: impl IntoIterator<Item = &'a Workspace>,
-) -> eyre::Result<Table> {
+pub fn workspace_table<'a>(workspaces: impl IntoIterator<Item = &'a Workspace>) -> Table {
+    let mut workspaces: Vec<_> = workspaces.into_iter().collect();
+    workspaces.sort_by(|a, b| b.root.cmp(&a.root).then_with(|| a.name.cmp(&b.name)));
+
     let mut table = Table::new(TABLE_SPEC);
     table.add_row(
         Row::new()
@@ -146,9 +93,7 @@ pub fn workspace_table<'a>(
             .with_cell("EXECS"),
     );
     for ws in workspaces {
-        for row in ws_rows(ws)? {
-            table.add_row(row);
-        }
+        table.add_row(ws_row(ws));
     }
-    Ok(table)
+    table
 }

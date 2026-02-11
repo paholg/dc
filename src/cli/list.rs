@@ -12,7 +12,7 @@ pub struct List;
 impl List {
     pub async fn run(self, state: State) -> eyre::Result<()> {
         let workspaces = Workspace::list(&state).await?;
-        eprint!("{}", workspace_table(&workspaces)?);
+        eprint!("{}", workspace_table(&workspaces));
         Ok(())
     }
 }

@@ -16,6 +16,8 @@ pub mod table;
 #[derive(Debug)]
 pub struct Workspace {
     pub path: PathBuf,
+    pub name: String,
+    pub root: bool,
     pub compose_project_name: String,
     pub containers: Vec<ContainerInfo>,
     pub dirty: bool,
@@ -144,9 +146,18 @@ impl ContainerGroup {
         let execs = execs.into_iter().flatten().collect();
         let stats = stats.into_iter().sum();
 
+        let root = self.path == state.project.path;
+        let name = self
+            .path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+
         Ok(Workspace {
             compose_project_name: compose_project_name(&self.path),
             path: self.path,
+            name,
+            root,
             containers: self.containers,
             dirty,
             execs,

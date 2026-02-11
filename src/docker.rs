@@ -5,7 +5,7 @@ use bollard::{
     query_parameters::{ListContainersOptions, StatsOptions},
     secret::ContainerSummaryStateEnum,
 };
-use derive_more::{Add, AddAssign, Sum};
+use derive_more::{Add, Sum};
 use eyre::{WrapErr, eyre};
 use futures::{StreamExt, future::try_join_all};
 
@@ -24,11 +24,12 @@ pub struct ExecSession {
     pub command: Vec<String>,
 }
 
-#[derive(Debug, Clone, Add, AddAssign, Sum)]
+#[derive(Debug, Clone, Add, Sum)]
 pub struct Stats {
     /// Current memory use in bytes.
     pub ram: u64,
 }
+
 pub struct DockerClient {
     // TODO: Instead of making this public, we should move all docker functionality we need to this
     // module.
@@ -93,10 +94,7 @@ impl DockerClient {
                     .memory_stats
                     .as_ref()
                     .and_then(|m| m.usage)
-                    .unwrap_or_else(|| {
-                        tracing::warn!("missing memory stats for container {container_id}");
-                        0
-                    });
+                    .unwrap_or_default();
                 Ok(Stats { ram })
             }
             Some(Err(e)) => Err(e.into()),

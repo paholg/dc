@@ -38,12 +38,12 @@ impl Prune {
 
         if !in_use.is_empty() {
             eprintln!("{GREEN}In Use{RESET} ({CYAN}skipping{RESET}):");
-            eprint!("{}", workspace_table(in_use.iter().copied())?);
+            eprint!("{}", workspace_table(in_use.iter().copied()));
             eprintln!();
         }
         if !dirty.is_empty() {
             eprintln!("{RED}Dirty{RESET} ({CYAN}skipping{RESET}):");
-            eprint!("{}", workspace_table(dirty.iter().copied())?);
+            eprint!("{}", workspace_table(dirty.iter().copied()));
             eprintln!();
         }
 
@@ -52,7 +52,7 @@ impl Prune {
         }
 
         eprintln!("{YELLOW}Will Remove - DATA WILL BE LOST{RESET}:");
-        eprint!("{}", workspace_table(to_clean.iter().copied())?);
+        eprint!("{}", workspace_table(to_clean.iter().copied()));
         eprintln!();
 
         if !confirm()? {

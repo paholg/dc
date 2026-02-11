@@ -1,7 +1,8 @@
 use std::borrow::Cow;
+use std::collections::HashMap;
 
 use bollard::Docker;
-use bollard::models::{ContainerCreateBody, HostConfig};
+use bollard::models::{ContainerCreateBody, HostConfig, VolumeCreateRequest};
 use bollard::query_parameters::{
     CreateContainerOptions, CreateImageOptionsBuilder, RemoveContainerOptions,
 };
@@ -33,21 +34,9 @@ impl Copy {
     pub async fn run(self, state: State) -> eyre::Result<()> {
         let from_ws = Workspace::get(&state, self.from.as_deref()).await?;
         let to_ws = Workspace::get(&state, self.to.as_deref()).await?;
-
-        let volumes = if !self.volumes.is_empty() {
-            self.volumes
-        } else {
-            let dc = state.devcontainer()?;
-            dc.common
-                .customizations
-                .dc
-                .default_copy_volumes
-                .ok_or_else(|| eyre!("no volumes specified and no defaultCopyVolumes configured"))?
-        };
-
         copy_volumes(
-            &state.docker.docker,
-            &volumes,
+            &state,
+            self.volumes,
             &from_ws.compose_project_name,
             &to_ws.compose_project_name,
         )
@@ -56,16 +45,28 @@ impl Copy {
 }
 
 pub(crate) async fn copy_volumes(
-    docker: &Docker,
-    volumes: &[String],
+    state: &State,
+    volumes: Vec<String>,
     from_project: &str,
     to_project: &str,
 ) -> eyre::Result<()> {
+    let volumes = if !volumes.is_empty() {
+        volumes
+    } else {
+        let dc = state.devcontainer()?;
+        dc.common
+            .customizations
+            .dc
+            .default_copy_volumes
+            .ok_or_else(|| eyre!("no volumes specified and no defaultCopyVolumes configured"))?
+    };
+
     let copies = volumes.iter().map(|vol| CopyVolume {
-        docker,
+        docker: &state.docker.docker,
         name: vol.clone(),
         src: format!("{from_project}_{vol}"),
         dst: format!("{to_project}_{vol}"),
+        to_project: to_project.to_string(),
     });
 
     Runner::run_parallel("copy volumes", copies).await
@@ -76,6 +77,7 @@ struct CopyVolume<'a> {
     name: String,
     src: String,
     dst: String,
+    to_project: String,
 }
 
 impl Runnable for CopyVolume<'_> {
@@ -88,7 +90,14 @@ impl Runnable for CopyVolume<'_> {
     }
 
     async fn run(self, _: crate::run::Token) -> eyre::Result<()> {
-        do_copy_volume(self.docker, &self.src, &self.dst).await
+        do_copy_volume(
+            self.docker,
+            &self.src,
+            &self.dst,
+            &self.to_project,
+            &self.name,
+        )
+        .await
     }
 }
 
@@ -109,8 +118,29 @@ async fn ensure_image(docker: &Docker) -> eyre::Result<()> {
     Ok(())
 }
 
-async fn do_copy_volume(docker: &Docker, src: &str, dst: &str) -> eyre::Result<()> {
+async fn do_copy_volume(
+    docker: &Docker,
+    src: &str,
+    dst: &str,
+    project: &str,
+    vol_name: &str,
+) -> eyre::Result<()> {
     ensure_image(docker).await?;
+
+    // Pre-create destination volume with docker compose labels so that it recognizes the volume and
+    // will manage it.
+    let labels = HashMap::from([
+        ("com.docker.compose.project".into(), project.to_string()),
+        ("com.docker.compose.volume".into(), vol_name.to_string()),
+    ]);
+    docker
+        .create_volume(VolumeCreateRequest {
+            name: Some(dst.to_string()),
+            labels: Some(labels),
+            ..Default::default()
+        })
+        .await?;
+
     let container = docker
         .create_container(
             Some(CreateContainerOptions {

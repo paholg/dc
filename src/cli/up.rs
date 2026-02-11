@@ -108,26 +108,13 @@ impl Up {
                 .await?;
         }
 
-        if let Some(ref copy_args) = self.copy
+        if let Some(copy_args) = self.copy
             && self.name.is_some()
         {
-            let volumes = if !copy_args.is_empty() {
-                copy_args.clone()
-            } else {
-                dc.common
-                    .customizations
-                    .dc
-                    .default_copy_volumes
-                    .clone()
-                    .ok_or_else(|| {
-                        eyre!("no volumes specified and no defaultCopyVolumes configured")
-                    })?
-            };
-
             let root_project = compose_project_name(&state.project.path);
             let new_project = compose_project_name(&worktree_path);
 
-            copy_volumes(&state.docker.docker, &volumes, &root_project, &new_project).await?;
+            copy_volumes(&state, copy_args, &root_project, &new_project).await?;
         }
 
         compose_up(compose, &worktree_path, &override_file).await?;

@@ -8,7 +8,9 @@ up:
     nix flake update
     cargo upgrade -i
 
-fix:
+fix: clippy-fix lint test
+
+clippy-fix:
     cargo clippy --fix --allow-staged
     cargo fmt
 

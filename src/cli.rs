@@ -53,7 +53,7 @@ impl State {
                 .project
                 .path
                 .file_name()
-                .map_or(false, |root| name == root),
+                .is_some_and(|root| name == root),
             None => true,
         }
     }

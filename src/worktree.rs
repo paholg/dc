@@ -7,6 +7,10 @@ use tokio::process::Command;
 use crate::run::pty::run_in_pty;
 
 pub async fn create(repo_path: &Path, workspace_dir: &Path, name: &str) -> eyre::Result<PathBuf> {
+    if Path::new(name).file_name().is_none_or(|f| f != name) {
+        eyre::bail!("invalid workspace name: {name:?}");
+    }
+
     let repo = gix::open(repo_path)
         .wrap_err_with(|| format!("failed to open git repo at {}", repo_path.display()))?;
 

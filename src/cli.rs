@@ -46,6 +46,17 @@ impl State {
     fn devcontainer(&self) -> eyre::Result<DevContainer> {
         DevContainer::load(&self.project)
     }
+
+    pub fn is_root(&self, name: Option<&str>) -> bool {
+        match name {
+            Some(name) => self
+                .project
+                .path
+                .file_name()
+                .map_or(false, |root| name == root),
+            None => true,
+        }
+    }
 }
 
 impl Cli {

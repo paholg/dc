@@ -28,7 +28,15 @@ impl Workspace {
     pub async fn get(state: &State, name: Option<&str>) -> eyre::Result<Workspace> {
         let groups = ContainerGroup::list(state).await?;
 
-        let group = if let Some(name) = name {
+        let is_root = state.is_root(name);
+        let group = if is_root {
+            groups
+                .into_iter()
+                .find(|g| g.path == state.project.path)
+                .ok_or_else(|| eyre!("root workspace not found"))?
+        } else {
+            // We can only get here if name.is_some().
+            let name = name.unwrap();
             groups
                 .into_iter()
                 .find(|g| {
@@ -41,11 +49,6 @@ impl Workspace {
                     }
                 })
                 .ok_or_else(|| eyre!("no workspace found for name {name}"))?
-        } else {
-            groups
-                .into_iter()
-                .find(|g| g.path == state.project.path)
-                .ok_or_else(|| eyre!("root workspace not found"))?
         };
         group.into_workspace(state).await
     }

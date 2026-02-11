@@ -43,12 +43,13 @@ impl Up {
         let dc = state.devcontainer()?;
         let dc_options = &dc.common.customizations.dc;
 
-        let worktree_path = match self.name {
-            Some(ref ws_name) => {
-                let workspace_dir = dc_options.workspace_dir(&state.project.path);
-                worktree::create(&state.project.path, &workspace_dir, ws_name).await?
-            }
-            None => state.project.path.clone(),
+        let is_root = state.is_root(self.name.as_deref());
+        let worktree_path = if is_root {
+            state.project.path.clone()
+        } else {
+            let ws_name = self.name.as_ref().unwrap();
+            let workspace_dir = dc_options.workspace_dir(&state.project.path);
+            worktree::create(&state.project.path, &workspace_dir, ws_name).await?
         };
 
         // Set up span.

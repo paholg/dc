@@ -3,6 +3,8 @@ use std::collections::HashMap;
 use std::io::{BufRead, Write};
 use std::path::Path;
 
+use eyre::WrapErr;
+
 use crate::ansi::{CYAN, GREEN, RED, RESET, YELLOW};
 use crate::cli::State;
 use crate::run::pty::run_in_pty;
@@ -115,7 +117,8 @@ impl Runnable for Cleanup<'_> {
         let override_file =
             std::env::temp_dir().join(format!("{}-override.yml", self.compose_name));
         if override_file.exists() {
-            std::fs::remove_file(&override_file)?;
+            std::fs::remove_file(&override_file)
+                .wrap_err_with(|| format!("failed to remove {}", override_file.display()))?;
         }
 
         // Remove any port-forward sidecar targeting this workspace

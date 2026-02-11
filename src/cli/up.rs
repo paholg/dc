@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use clap::Args;
 use clap_complete::engine::ArgValueCompleter;
 use color_eyre::owo_colors::OwoColorize;
-use eyre::eyre;
+use eyre::{WrapErr, eyre};
 use serde_json::json;
 use tracing::info_span;
 use tracing_indicatif::span_ext::IndicatifSpanExt;
@@ -267,7 +267,8 @@ fn write_compose_override(
         "services": { &compose.service: service_obj }
     }))?;
 
-    std::fs::write(&override_path, content)?;
+    std::fs::write(&override_path, content)
+        .wrap_err_with(|| format!("failed to write {}", override_path.display()))?;
     Ok(override_path)
 }
 

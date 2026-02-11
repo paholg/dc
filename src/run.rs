@@ -2,6 +2,7 @@ use std::borrow::Cow;
 
 use color_eyre::owo_colors::OwoColorize;
 use crossterm::style::SetForegroundColor;
+use eyre::WrapErr;
 use tracing::{Instrument, Span, info_span};
 use tracing_indicatif::span_ext::IndicatifSpanExt;
 
@@ -47,8 +48,9 @@ fn run_span(name: &str, description: &str) -> Span {
 impl Runner {
     pub async fn run<R: Runnable>(runnable: R) -> eyre::Result<()> {
         let span = run_span(&runnable.name(), &runnable.description());
+        let ctx = runnable.name().into_owned();
 
-        runnable.run(TOK).instrument(span).await
+        runnable.run(TOK).instrument(span).await.wrap_err(ctx)
     }
 
     pub async fn run_parallel<R, I>(name: &str, runnables: I) -> eyre::Result<()>
@@ -81,7 +83,10 @@ impl Runner {
                 );
                 let pb_message = format!("[{name}] {message}");
                 span.pb_set_message(&pb_message);
-                runnable.run(TOK).instrument(span)
+                let ctx = runnable.name().into_owned();
+                async move {
+                    runnable.run(TOK).await.wrap_err(ctx)
+                }.instrument(span)
             })
             .collect();
 

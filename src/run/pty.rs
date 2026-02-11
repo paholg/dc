@@ -25,7 +25,7 @@ pub async fn run_in_pty(argv: &[&str], dir: Option<&Path>) -> eyre::Result<()> {
     let status = child.wait().await?;
     if !status.success() {
         let code = status.code().unwrap_or(1);
-        eyre::bail!("command exited with status {code}");
+        eyre::bail!("{} exited with status {code}", argv.join(" "));
     }
 
     Ok(())

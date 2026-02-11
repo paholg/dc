@@ -8,7 +8,7 @@ use bollard::query_parameters::{
 };
 use clap::Args;
 use clap_complete::engine::ArgValueCompleter;
-use eyre::eyre;
+use eyre::{WrapErr, eyre};
 use futures::StreamExt;
 
 use crate::cli::State;
@@ -50,7 +50,12 @@ pub async fn forward(state: &State, name: Option<&str>) -> eyre::Result<()> {
     remove_sidecars(state).await?;
 
     // Get container IP and network
-    let info = state.docker.docker.inspect_container(cid, None).await?;
+    let info = state
+        .docker
+        .docker
+        .inspect_container(cid, None)
+        .await
+        .wrap_err_with(|| format!("failed to inspect container {cid}"))?;
     let networks = info
         .network_settings
         .and_then(|ns| ns.networks)

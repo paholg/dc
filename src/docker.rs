@@ -6,7 +6,7 @@ use bollard::{
     secret::ContainerSummaryStateEnum,
 };
 use derive_more::{Add, AddAssign, Sum};
-use eyre::eyre;
+use eyre::{WrapErr, eyre};
 use futures::{StreamExt, future::try_join_all};
 
 #[derive(Debug)]
@@ -37,7 +37,8 @@ pub struct DockerClient {
 
 impl DockerClient {
     pub async fn new() -> eyre::Result<Self> {
-        let docker = Docker::connect_with_local_defaults()?;
+        let docker =
+            Docker::connect_with_local_defaults().wrap_err("failed to connect to Docker")?;
         Ok(Self { docker })
     }
 
@@ -104,7 +105,11 @@ impl DockerClient {
     }
 
     pub async fn execs(&self, container_id: &str) -> eyre::Result<Vec<ExecSession>> {
-        let info = self.docker.inspect_container(container_id, None).await?;
+        let info = self
+            .docker
+            .inspect_container(container_id, None)
+            .await
+            .wrap_err_with(|| format!("failed to inspect container {container_id}"))?;
         let exec_ids = info.exec_ids.unwrap_or_default();
 
         let futures = exec_ids

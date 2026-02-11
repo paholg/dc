@@ -1,5 +1,6 @@
 use std::{fs::File, path::PathBuf};
 
+use eyre::WrapErr;
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 use serde_inline_default::serde_inline_default;
@@ -68,8 +69,11 @@ impl DevContainer {
             })
             .ok_or_else(|| eyre::eyre!("no devcontainer.json found in {}", dir.display()))?;
 
-        let contents = File::open(&path)?;
-        let devcontainer: DevContainer = serde_json::from_reader(&contents)?;
+        let contents =
+            File::open(&path).wrap_err_with(|| format!("failed to open {}", path.display()))?;
+        let jd = &mut serde_json::Deserializer::from_reader(&contents);
+        let devcontainer: DevContainer = serde_path_to_error::deserialize(jd)
+            .wrap_err_with(|| format!("failed to parse {}", path.display()))?;
         Ok(devcontainer)
     }
 }

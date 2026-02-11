@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use eyre::eyre;
+use eyre::{WrapErr, eyre};
 use indexmap::IndexMap;
 use serde::Deserialize;
 
@@ -27,9 +27,11 @@ impl Config {
             .ok_or_else(|| eyre::eyre!("could not determine config directory"))?;
         let path = dirs.config_dir().join("config.toml");
         let cfg = config::Config::builder()
-            .add_source(config::File::from(path))
-            .build()?;
-        Ok(cfg.try_deserialize()?)
+            .add_source(config::File::from(path.clone()))
+            .build()
+            .wrap_err_with(|| format!("failed to load {}", path.display()))?;
+        serde_path_to_error::deserialize(cfg)
+            .wrap_err_with(|| format!("failed to parse {}", path.display()))
     }
 
     pub fn project(mut self, name: Option<&str>) -> eyre::Result<(String, Project)> {

@@ -25,6 +25,7 @@ pty-process          = { version = "0.5", features = ["async"] }
 serde                = { version = "1.0.228", features = ["derive"] }
 serde-inline-default = "1.0.1"
 serde_json           = { version = "1.0.149", features = ["preserve_order"] }
+serde_path_to_error  = "0.1.20"
 serde_with           = "3"
 shellexpand          = "3.1.1"
 tabular              = { version = "0.2.0", features = ["ansi-cell"] }

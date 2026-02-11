@@ -1,12 +1,10 @@
 use bollard::secret::ContainerSummaryStateEnum;
+use owo_colors::OwoColorize;
 use tabular::{Row, Table};
 
-use crate::{
-    bytes::format_bytes,
-    workspace::{ExecSession, Workspace},
-};
+use crate::{bytes::format_bytes, workspace::Workspace};
 
-const TABLE_SPEC: &str = "{:<}  {:<}  {:>}  {:>}  {:<}";
+const TABLE_SPEC: &str = "{:<}  {:<}  {:>}  {:>}  {:>}";
 
 fn format_age(created: Option<i64>) -> String {
     let ts = match created {
@@ -47,12 +45,20 @@ fn ws_fields(ws: &Workspace) -> WsFields {
     } else {
         ws.name.clone()
     };
-    let status = match ws.status() {
-        ContainerSummaryStateEnum::EMPTY => "-".to_string(),
-        ref s => s.to_string(),
+    let state = ws.status();
+    let status = match state {
+        ContainerSummaryStateEnum::EMPTY => "-".dimmed().to_string(),
+        ContainerSummaryStateEnum::RUNNING => state.green().to_string(),
+        ContainerSummaryStateEnum::EXITED | ContainerSummaryStateEnum::DEAD => {
+            state.red().to_string()
+        }
+        ContainerSummaryStateEnum::CREATED
+        | ContainerSummaryStateEnum::PAUSED
+        | ContainerSummaryStateEnum::RESTARTING
+        | ContainerSummaryStateEnum::REMOVING => state.yellow().to_string(),
     };
     let mem = match ws.stats.ram {
-        0 => "-".into(),
+        0 => String::new(),
         ram => format_bytes(ram),
     };
     WsFields {
@@ -66,13 +72,13 @@ fn ws_fields(ws: &Workspace) -> WsFields {
 fn ws_row(ws: &Workspace) -> Row {
     let f = ws_fields(ws);
     let execs = if ws.execs.is_empty() {
-        "-".to_string()
+        String::new()
     } else {
         ws.execs.iter().count().to_string()
     };
     Row::new()
         .with_cell(f.name)
-        .with_cell(f.status)
+        .with_ansi_cell(f.status)
         .with_cell(f.created)
         .with_ansi_cell(f.mem)
         .with_cell(execs)

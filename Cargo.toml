@@ -21,6 +21,7 @@ gix                  = "0.78.0"
 indexmap             = { version = "2.13.0", features = ["serde"] }
 indicatif            = "0.18"
 jiff                 = "0.2"
+owo-colors           = "4.2.3"
 pty-process          = { version = "0.5", features = ["async"] }
 serde                = { version = "1.0.228", features = ["derive"] }
 serde-inline-default = "1.0.1"

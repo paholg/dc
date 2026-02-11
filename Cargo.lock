@@ -597,6 +597,7 @@ dependencies = [
  "indexmap 2.13.0",
  "indicatif",
  "jiff",
+ "owo-colors",
  "pty-process",
  "serde",
  "serde-inline-default",

@@ -17,6 +17,7 @@ mod fwd;
 mod kill;
 mod list;
 mod prune;
+mod show;
 pub(crate) mod up;
 
 const ABOUT: &str = "TODO";
@@ -97,6 +98,7 @@ impl Cli {
             Commands::Prune(prune) => prune.run(state).await,
             Commands::Kill(kill) => kill.run(state).await,
             Commands::Copy(copy) => copy.run(state).await,
+            Commands::Show(show) => show.run(state).await,
         }
     }
 }
@@ -125,4 +127,6 @@ pub enum Commands {
     Kill(kill::Kill),
     #[command()]
     Copy(copy::Copy),
+    /// Show some value.
+    Show(show::Show),
 }

@@ -142,6 +142,43 @@ impl DockerClient {
         Ok(result)
     }
 
+    pub async fn workspace_forwarded_ports(
+        &self,
+        project: &str,
+        compose_project_name: &str,
+    ) -> eyre::Result<Vec<u16>> {
+        let mut filters = HashMap::new();
+        filters.insert(
+            "label".into(),
+            vec![
+                "dev.dc.fwd=true".to_string(),
+                format!("dev.dc.project={project}"),
+                format!("dev.dc.workspace={compose_project_name}"),
+            ],
+        );
+        let containers = self
+            .docker
+            .list_containers(Some(ListContainersOptions {
+                all: false,
+                filters: Some(filters),
+                ..Default::default()
+            }))
+            .await?;
+
+        let mut ports: Vec<u16> = containers
+            .into_iter()
+            .flat_map(|c| {
+                c.ports
+                    .unwrap_or_default()
+                    .into_iter()
+                    .filter_map(|p| p.public_port)
+            })
+            .collect();
+        ports.sort_unstable();
+        ports.dedup();
+        Ok(ports)
+    }
+
     pub async fn execs(&self, container_id: &str) -> eyre::Result<Vec<ExecSession>> {
         let info = self
             .docker

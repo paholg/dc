@@ -2,9 +2,8 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use serde_inline_default::serde_inline_default;
-use serde_with::{OneOrMany, serde_as};
+use serde_with::serde_as;
 
-use crate::devcontainer::port_map::PortMap;
 use crate::run::cmd::Cmd;
 
 fn deserialize_shell_path_opt<'de, D: serde::Deserializer<'de>>(
@@ -22,8 +21,6 @@ pub struct DcOptions {
     pub default_exec: Option<Cmd>,
     #[serde(default, deserialize_with = "deserialize_shell_path_opt")]
     worktree_folder: Option<PathBuf>,
-    #[serde_as(as = "Option<OneOrMany<_>>")]
-    pub ports: Option<Vec<PortMap>>,
     /// The default volumes to be copied with `dc copy` and `dc up --copy`.
     pub default_copy_volumes: Option<Vec<String>>,
     /// Whether to mount the project's git directory into each workspace's devcontainer.

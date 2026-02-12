@@ -48,8 +48,6 @@ unsupported!(
     features,
     overrideFeatureInstallOrder,
     secrets,
-    forwardPorts,
-    portsAttributes,
     otherPortsAttributes,
     mounts
 );

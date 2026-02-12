@@ -7,11 +7,14 @@ use serde_inline_default::serde_inline_default;
 use serde_with::{OneOrMany, serde_as};
 
 pub mod dc_options;
+pub mod forward_port;
 pub mod lifecycle_command;
-pub mod port_map;
 mod unsupported;
 
-use crate::{config::Project, devcontainer::dc_options::DcOptions};
+use crate::{
+    config::Project,
+    devcontainer::{dc_options::DcOptions, forward_port::ForwardPort},
+};
 use lifecycle_command::LifecycleCommand;
 use unsupported::Unsupported;
 
@@ -158,9 +161,7 @@ pub struct Common {
     pub override_feature_install_order: Vec<String>,
     #[serde(deserialize_with = "unsupported::secrets::warn")]
     pub secrets: serde_json::Value,
-    #[serde(deserialize_with = "unsupported::forwardPorts::warn")]
-    pub forward_ports: Vec<Port>,
-    #[serde(deserialize_with = "unsupported::portsAttributes::warn")]
+    pub forward_ports: Vec<ForwardPort>,
     pub ports_attributes: IndexMap<String, PortAttributes>,
     /// Set default properties that are applied to all ports that don't get properties from the
     /// setting `remote.portsAttributes`

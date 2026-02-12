@@ -13,7 +13,7 @@ use futures::StreamExt;
 
 use crate::cli::State;
 use crate::complete;
-use crate::devcontainer::port_map::PortMap;
+use crate::devcontainer::forward_port::ForwardPort;
 use crate::workspace::Workspace;
 
 const SOCAT_IMAGE: &str = "docker.io/alpine/socat:latest";
@@ -41,11 +41,8 @@ pub async fn forward(state: &State, name: &str) -> eyre::Result<()> {
     let cid = ws.service_container_id()?;
 
     let dc = state.devcontainer()?;
-    let dc_options = dc.common.customizations.dc;
 
-    let ports = dc_options
-        .ports
-        .ok_or_else(|| eyre!("no ports set in devcontainer.json"))?;
+    let ports = dc.common.forward_ports;
 
     remove_sidecars(state).await?;
 
@@ -88,17 +85,17 @@ async fn create_sidecar(
     compose_project_name: &str,
     network_name: &str,
     ip: &str,
-    port: &PortMap,
+    fwd_port: &ForwardPort,
 ) -> eyre::Result<()> {
-    let sidecar_name = format!("dc-fwd-{compose_project_name}-{}", port.host);
-    let port_key = format!("{}/tcp", port.host);
+    let sidecar_name = format!("dc-fwd-{compose_project_name}-{}", fwd_port);
+    let port_key = format!("{}/tcp", fwd_port.port);
 
     let mut port_bindings: HashMap<String, Option<Vec<PortBinding>>> = HashMap::new();
     port_bindings.insert(
         port_key.clone(),
         Some(vec![PortBinding {
             host_ip: Some("127.0.0.1".to_string()),
-            host_port: Some(port.host.to_string()),
+            host_port: Some(fwd_port.port.to_string()),
         }]),
     );
 
@@ -121,8 +118,12 @@ async fn create_sidecar(
             ContainerCreateBody {
                 image: Some(SOCAT_IMAGE.to_string()),
                 cmd: Some(vec![
-                    format!("TCP-LISTEN:{},fork,reuseaddr", port.host),
-                    format!("TCP:{ip}:{}", port.container),
+                    format!("TCP-LISTEN:{},fork,reuseaddr", fwd_port.port),
+                    format!(
+                        "TCP:{}:{}",
+                        fwd_port.service.as_deref().unwrap_or(ip),
+                        fwd_port.port
+                    ),
                 ]),
                 labels: Some(labels),
                 exposed_ports: Some(vec![port_key.clone()]),
@@ -142,10 +143,7 @@ async fn create_sidecar(
         .start_container(&sidecar_name, None)
         .await?;
 
-    eprintln!(
-        "Forwarding 127.0.0.1:{} -> {ip}:{} (sidecar: {sidecar_name})",
-        port.host, port.container
-    );
+    eprintln!("Forwarding to {fwd_port}");
 
     Ok(())
 }

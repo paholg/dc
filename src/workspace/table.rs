@@ -4,7 +4,7 @@ use tabular::{Row, Table};
 
 use crate::{bytes::format_bytes, workspace::Workspace};
 
-const TABLE_SPEC: &str = "{:<}  {:<}  {:<}  {:>}  {:>}  {:>}  {:<}";
+const TABLE_SPEC: &str = "{:<}  {:<}  {:<}  {:>}  {:>}  {:>}  {:<}  {:<}";
 
 fn format_age(created: Option<i64>) -> String {
     let ts = match created {
@@ -38,14 +38,11 @@ struct WsFields {
     created: String,
     mem: String,
     ports: String,
+    git: String,
 }
 
 fn ws_fields(ws: &Workspace) -> WsFields {
-    let name = if ws.dirty {
-        format!("{}*", ws.name)
-    } else {
-        ws.name.clone()
-    };
+    let name = ws.name.clone();
     let state = ws.status();
     let status = match state {
         ContainerSummaryStateEnum::EMPTY => "-".dimmed().to_string(),
@@ -78,6 +75,7 @@ fn ws_fields(ws: &Workspace) -> WsFields {
         created: format_age(ws.created()),
         mem,
         ports,
+        git: ws.git_status.to_string(),
     }
 }
 
@@ -97,6 +95,7 @@ fn ws_row(ws: &Workspace) -> Row {
         .with_ansi_cell(f.mem)
         .with_cell(execs)
         .with_ansi_cell(f.ports)
+        .with_ansi_cell(f.git)
 }
 
 /// Full table with header row, for `list` output.
@@ -113,7 +112,8 @@ pub fn workspace_table<'a>(workspaces: impl IntoIterator<Item = &'a Workspace>) 
             .with_cell("CREATED")
             .with_cell("MEM")
             .with_cell("EXECS")
-            .with_cell("PORTS"),
+            .with_cell("PORTS")
+            .with_cell("GIT"),
     );
     for ws in workspaces {
         table.add_row(ws_row(ws));

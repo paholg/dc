@@ -29,7 +29,7 @@ impl Prune {
         for ws in &workspaces {
             if ws.path == state.project.path || !ws.execs.is_empty() {
                 in_use.push(ws);
-            } else if ws.dirty {
+            } else if ws.is_dirty() {
                 dirty.push(ws);
             } else {
                 to_clean.push(ws);

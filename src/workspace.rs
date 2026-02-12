@@ -4,13 +4,13 @@ use std::path::PathBuf;
 use bollard::models::ContainerSummaryStateEnum;
 use eyre::eyre;
 use futures::future::try_join_all;
-use tokio::process::Command;
 
 use crate::cli::State;
 use crate::cli::up::compose_project_name;
 use crate::docker::{ContainerInfo, ExecSession, Stats};
 use crate::worktree;
 
+pub mod git_status;
 pub mod table;
 
 #[derive(Debug)]
@@ -20,7 +20,7 @@ pub struct Workspace {
     pub root: bool,
     pub compose_project_name: String,
     pub containers: Vec<ContainerInfo>,
-    pub dirty: bool,
+    pub git_status: git_status::GitStatus,
     pub execs: Vec<ExecSession>,
     pub stats: Stats,
     pub fwd_ports: Vec<u16>,
@@ -65,6 +65,10 @@ impl Workspace {
 
     pub fn created(&self) -> Option<i64> {
         self.containers.iter().filter_map(|c| c.created).min()
+    }
+
+    pub fn is_dirty(&self) -> bool {
+        self.git_status.is_dirty()
     }
 
     pub fn service_container_id(&self) -> eyre::Result<&str> {
@@ -130,21 +134,11 @@ impl ContainerGroup {
         state: &State,
         fwd_ports: &HashMap<String, Vec<u16>>,
     ) -> eyre::Result<Workspace> {
-        let dirty = if self.path.exists() {
-            !Command::new("git")
-                .args(["status", "--porcelain"])
-                .current_dir(&self.path)
-                .output()
-                .await?
-                .stdout
-                .is_empty()
-        } else {
-            false
-        };
-
+        let git_future = git_status::GitStatus::fetch(&self.path);
         let execs_futures = try_join_all(self.containers.iter().map(|c| state.docker.execs(&c.id)));
         let stats_futures = try_join_all(self.containers.iter().map(|c| state.docker.stats(&c.id)));
-        let (execs, stats) = tokio::try_join!(execs_futures, stats_futures)?;
+        let (git_status, execs, stats) =
+            tokio::try_join!(git_future, execs_futures, stats_futures)?;
 
         let execs = execs.into_iter().flatten().collect();
         let stats = stats.into_iter().sum();
@@ -181,7 +175,7 @@ impl ContainerGroup {
             name,
             root,
             containers: self.containers,
-            dirty,
+            git_status,
             execs,
             stats,
             fwd_ports,

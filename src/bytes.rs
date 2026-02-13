@@ -14,12 +14,12 @@ impl Unit<'_> {
     }
 }
 
-const K: f32 = 1024.0;
-const M: f32 = 1024.0 * K;
-const G: f32 = 1024.0 * M;
-const T: f32 = 1024.0 * G;
-const P: f32 = 1024.0 * T;
-const E: f32 = 1024.0 * P;
+const K: f32 = 1000.0;
+const M: f32 = 1000.0 * K;
+const G: f32 = 1000.0 * M;
+const T: f32 = 1000.0 * G;
+const P: f32 = 1000.0 * T;
+const E: f32 = 1000.0 * P;
 
 const BYTE_UNITS: [Unit; 6] = [
     Unit::new(K, "k", BLUE),

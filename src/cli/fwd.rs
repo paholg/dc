@@ -87,7 +87,11 @@ async fn create_sidecar(
     ip: &str,
     fwd_port: &ForwardPort,
 ) -> eyre::Result<()> {
-    let sidecar_name = format!("dc-fwd-{compose_project_name}-{}", fwd_port);
+    let name = match &fwd_port.service {
+        Some(host) => format!("{host}_{}", fwd_port.port),
+        None => format!("{}", fwd_port.port),
+    };
+    let sidecar_name = format!("dc-fwd-{compose_project_name}-{name}");
     let port_key = format!("{}/tcp", fwd_port.port);
 
     let mut port_bindings: HashMap<String, Option<Vec<PortBinding>>> = HashMap::new();

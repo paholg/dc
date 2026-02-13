@@ -20,10 +20,9 @@ futures              = "0.3.31"
 gix                  = "0.78.0"
 indexmap             = { version = "2.13.0", features = ["serde"] }
 indicatif            = "0.18"
-itertools = "0.14.0"
+itertools            = "0.14.0"
 jiff                 = "0.2"
 owo-colors           = "4.2.3"
-pty-process          = { version = "0.5", features = ["async"] }
 serde                = { version = "1.0.228", features = ["derive"] }
 serde-inline-default = "1.0.1"
 serde_json           = { version = "1.0.149", features = ["preserve_order"] }

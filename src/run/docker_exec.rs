@@ -49,6 +49,6 @@ impl run::Runnable for DockerExec<'_> {
         args.extend(self.cmd.as_args());
 
         let full_argv: Vec<&str> = std::iter::once("docker").chain(args).collect();
-        super::pty::run_in_pty(&full_argv, None).await
+        super::run_cmd(&full_argv, None).await
     }
 }

@@ -38,9 +38,7 @@ fn fetch_sync(path: &Path) -> eyre::Result<GitStatus> {
     gs.ahead = ahead;
     gs.behind = behind;
 
-    let iter = repo
-        .status(gix::progress::Discard)?
-        .into_iter(Vec::new())?;
+    let iter = repo.status(gix::progress::Discard)?.into_iter(Vec::new())?;
 
     for item in iter {
         let item = item?;

@@ -46,6 +46,6 @@ impl run::Runnable for NamedCmd<'_> {
 
     async fn run(self, _: run::Token) -> eyre::Result<()> {
         let argv = self.cmd.as_args();
-        super::pty::run_in_pty(&argv, self.dir).await
+        super::run_cmd(&argv, self.dir).await
     }
 }

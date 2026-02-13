@@ -7,7 +7,7 @@ use eyre::WrapErr;
 
 use crate::ansi::{CYAN, GREEN, RED, RESET, YELLOW};
 use crate::cli::State;
-use crate::run::pty::run_in_pty;
+use crate::run::run_cmd;
 use crate::run::{self, Runnable, Runner};
 use crate::workspace::Workspace;
 use crate::workspace::table::workspace_table;
@@ -100,12 +100,10 @@ impl Runnable for Cleanup<'_> {
     }
 
     async fn run(self, _: run::Token) -> eyre::Result<()> {
-        run_in_pty(
+        run_cmd(
             &[
                 "docker",
                 "compose",
-                "--progress",
-                "plain",
                 "-p",
                 &self.compose_name,
                 "down",
@@ -162,7 +160,7 @@ impl Runnable for Cleanup<'_> {
             let path_str = self.path.to_string_lossy();
             args.push(&path_str);
 
-            run_in_pty(&args, Some(self.repo_path)).await?;
+            run_cmd(&args, Some(self.repo_path)).await?;
         }
 
         eprintln!("Removed {}", self.path.display());

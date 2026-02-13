@@ -4,7 +4,7 @@ use std::process::Output;
 use eyre::WrapErr;
 use tokio::process::Command;
 
-use crate::run::pty::run_in_pty;
+use crate::run::run_cmd;
 
 pub async fn create(
     repo_path: &Path,
@@ -35,7 +35,7 @@ pub async fn create(
         if detach {
             args.push("--detach");
         }
-        run_in_pty(&args, Some(repo_path)).await?;
+        run_cmd(&args, Some(repo_path)).await?;
     }
 
     Ok(worktree_path)

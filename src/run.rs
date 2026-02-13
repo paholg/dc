@@ -6,11 +6,12 @@ use eyre::WrapErr;
 use tracing::{Instrument, Span, info_span};
 use tracing_indicatif::span_ext::IndicatifSpanExt;
 
+use tokio::io::AsyncBufReadExt;
+
 use crate::ansi::{BLUE, CYAN, GREEN, RESET, YELLOW};
 
 pub mod cmd;
 pub mod docker_exec;
-pub mod pty;
 
 /// A token required to call `Runnable::run`.
 ///
@@ -92,4 +93,43 @@ impl Runner {
 
         Ok(())
     }
+}
+
+/// Run the given command, capturing all of its output and printing it ourselves, so it plays nicely
+/// with our spinners.
+pub async fn run_cmd(argv: &[&str], dir: Option<&std::path::Path>) -> eyre::Result<()> {
+    let mut cmd = tokio::process::Command::new(argv[0]);
+    cmd.args(&argv[1..]);
+    if let Some(d) = dir {
+        cmd.current_dir(d);
+    }
+    cmd.stdout(std::process::Stdio::piped());
+    cmd.stderr(std::process::Stdio::piped());
+
+    let mut child = cmd.spawn()?;
+
+    let mut stdout_lines = tokio::io::BufReader::new(child.stdout.take().unwrap()).lines();
+    let mut stderr_lines = tokio::io::BufReader::new(child.stderr.take().unwrap()).lines();
+
+    let (status, _, _) = tokio::join!(
+        child.wait(),
+        async {
+            while let Ok(Some(line)) = stdout_lines.next_line().await {
+                tracing::trace!("{line}");
+            }
+        },
+        async {
+            while let Ok(Some(line)) = stderr_lines.next_line().await {
+                tracing::trace!("{line}");
+            }
+        },
+    );
+
+    let status = status?;
+    if !status.success() {
+        let code = status.code().unwrap_or(1);
+        eyre::bail!("{} exited with status {code}", argv.join(" "));
+    }
+
+    Ok(())
 }

@@ -268,8 +268,6 @@ fn write_compose_override(
 fn compose_base_args(compose: &Compose, worktree_path: &Path, override_file: &Path) -> Vec<String> {
     let mut args = vec![
         "compose".into(),
-        "--progress".into(),
-        "plain".into(),
         "-p".into(),
         compose_project_name(worktree_path),
     ];

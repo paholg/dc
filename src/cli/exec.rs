@@ -17,17 +17,17 @@ use crate::workspace::Workspace;
 #[derive(Debug, Args)]
 pub struct Exec {
     /// name of workspace [default: current working directory]
-    #[arg(add = ArgValueCompleter::new(complete::complete_workspace))]
-    name: Option<String>,
+    #[arg(short, long, add = ArgValueCompleter::new(complete::complete_workspace))]
+    workspace: Option<String>,
 
     /// command to run [default: Configured defaultExec]
-    #[arg(num_args = 0.., allow_hyphen_values = true, trailing_var_arg = true)]
+    #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
     cmd: Vec<String>,
 }
 
 impl Exec {
     pub async fn run(self, state: State) -> eyre::Result<()> {
-        let name = state.resolve_name(self.name).await?;
+        let name = state.resolve_name(self.workspace).await?;
         let ws = Workspace::get(&state, &name).await?;
         if ws.status() != ContainerSummaryStateEnum::RUNNING {
             return Err(eyre!("workspace is not running: {}", ws.path.display()));

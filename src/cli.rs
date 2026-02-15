@@ -21,7 +21,8 @@ mod list;
 mod show;
 pub(crate) mod up;
 
-const ABOUT: &str = "TODO";
+const ABOUT: &str =
+    "A tool for managing devcontainers, especially when combined with git worktrees";
 
 #[derive(Debug, Parser)]
 #[command(version, about = ABOUT)]
@@ -93,7 +94,10 @@ impl State {
         let worktrees = worktree::list(&self.project.path).await?;
 
         worktrees.into_iter().find(|wt| wt == &cwd).ok_or_else(|| {
-            eyre::eyre!("not inside a worktree of project '{}'", self.project_name)
+            eyre::eyre!(
+                "no workspace specified and not inside a worktree of project '{}'",
+                self.project_name
+            )
         })?;
 
         Ok(cwd

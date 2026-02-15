@@ -5,7 +5,7 @@ use crate::{
     workspace::{Workspace, table::workspace_table},
 };
 
-/// List active devcontainers
+/// List all workspaces for the project
 #[derive(Debug, Args)]
 pub struct List;
 

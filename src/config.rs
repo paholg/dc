@@ -34,12 +34,13 @@ impl Config {
             .wrap_err_with(|| format!("failed to parse {}", path.display()))
     }
 
-    pub fn project(mut self, name: Option<&str>) -> eyre::Result<(String, Project)> {
+    pub fn project(mut self, project_name: Option<String>) -> eyre::Result<(String, Project)> {
+        let name = project_name.or_else(|| std::env::var("DC_PROJECT").ok());
         match name {
             Some(name) => self
                 .projects
-                .swap_remove_entry(name)
-                .ok_or_else(|| eyre!("no project configured with name: {name}")),
+                .swap_remove_entry(&name)
+                .ok_or_else(|| eyre!("no project configured with name: {name:?}")),
             None => self
                 .projects
                 .into_iter()

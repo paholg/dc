@@ -15,6 +15,11 @@ use bollard::Docker;
 use bollard::query_parameters::{ListContainersOptions, RemoveContainerOptions};
 use clap::Args;
 
+/// Clean up any workspaces not actively in use.
+///
+/// Here, "actively in use" means you have it open in vscode or a `docker exec`
+/// session, or that you have uncommited git changes -- this will remove running
+/// containers and delete their data.
 #[derive(Debug, Args)]
 pub struct Prune;
 

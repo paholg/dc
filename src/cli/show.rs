@@ -1,13 +1,12 @@
 use std::path::Path;
 
 use clap::{Args, Subcommand};
-use clap_complete::engine::ArgValueCompleter;
 use itertools::Itertools;
 
 use crate::cli::State;
 use crate::cli::up::compose_project_name;
-use crate::complete;
 
+/// Show some value
 #[derive(Debug, Args)]
 pub struct Show {
     #[command(subcommand)]
@@ -16,18 +15,14 @@ pub struct Show {
 
 #[derive(Debug, Subcommand)]
 enum ShowCommands {
-    /// Show currently-forwarded ports for a workspace.
+    /// Show currently-forwarded ports for this workspace
     Ports(Ports),
-    /// Print the current workspace name, or exit 1 if not in one.
+    /// Print the current workspace name, or exit 1
     Workspace(ShowWorkspace),
 }
 
 #[derive(Debug, Args)]
-struct Ports {
-    /// name of workspace [default: current working directory]
-    #[arg(add = ArgValueCompleter::new(complete::complete_workspace))]
-    name: Option<String>,
-}
+struct Ports;
 
 #[derive(Debug, Args)]
 struct ShowWorkspace;
@@ -43,7 +38,7 @@ impl Show {
 
 impl Ports {
     async fn run(self, state: State) -> eyre::Result<()> {
-        let name = state.resolve_name(self.name).await?;
+        let name = state.resolve_workspace().await?;
         let cpn = compose_project_name(Path::new(&name));
         let ports = state
             .docker
@@ -58,7 +53,7 @@ impl Ports {
 
 impl ShowWorkspace {
     async fn run(self, state: State) -> eyre::Result<()> {
-        match state.resolve_name(None).await {
+        match state.resolve_workspace().await {
             Ok(name) => {
                 println!("{name}");
                 Ok(())

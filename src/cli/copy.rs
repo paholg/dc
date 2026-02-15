@@ -16,15 +16,12 @@ use crate::complete;
 use crate::run::{Runnable, Runner};
 use crate::workspace::Workspace;
 
-/// Copy named volumes from one workspace to another
+/// Copy named volumes to this workspace from another
 #[derive(Debug, Args)]
 #[command(verbatim_doc_comment)]
 pub struct Copy {
     #[arg(short, long, add = ArgValueCompleter::new(complete::complete_workspace))]
     from: String,
-
-    #[arg(short, long, add = ArgValueCompleter::new(complete::complete_workspace))]
-    to: String,
 
     /// Volume names to copy [default: configured defaultCopyVolumes]
     volumes: Vec<String>,
@@ -32,8 +29,10 @@ pub struct Copy {
 
 impl Copy {
     pub async fn run(self, state: State) -> eyre::Result<()> {
+        let to = state.resolve_workspace().await?;
+
         let from_ws = Workspace::get(&state, &self.from).await?;
-        let to_ws = Workspace::get(&state, &self.to).await?;
+        let to_ws = Workspace::get(&state, &to).await?;
         copy_volumes(
             &state,
             self.volumes,

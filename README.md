@@ -61,11 +61,16 @@ add a `dc` field with these properties, though none are required.
 
 * `defaultExec` - The command to run on `dc exec` and `dc up --exec` if none is
  specified.
-* `worktreeFolter` - The directory to place `dc`-generated worktrees. Defaults
+* `worktreeFolder` - The directory to place `dc`-generated worktrees. Defaults
   to `/tmp/`.
-* `forwardPort` - The default port to use for `dc fwd`.
 * `defaultCopyVolumes` - The volumes to copy with `dc copy` and `dc up --copy`
   if none are specified.
+* `mountGit` [default `true`]- Whether to mount your project's git directory in
+  workspace devcontainers. Git worktrees have a simple `.git` file that just
+  holds the path to the real `.git` directory. If it's not available, then `git`
+  commands won't work. This flag ensures it's available.
+
+We also make use of `forwardPorts` from the standard devcontainer configuration.
 
 ## Detailed Usage
 
@@ -75,13 +80,6 @@ To make this tool work well, there are some important tips for how you configure
 your devcontainers.
 
 ### Ports
-
-Do not forward hard-coded ports to your containers; this will prevent `dc` from
-bringing up more than one at a time.
-
-Instead, either allow the OS to provide a port, and track it, or use `dc fwd` to
-forward ports to workspaces of your choice. This keeps you flexible -- you can
-run `dc fwd` at any time and change which container you forward too.
 
 ### Configuration and Caches
 

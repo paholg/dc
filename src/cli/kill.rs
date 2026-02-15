@@ -1,35 +1,30 @@
 use clap::Args;
-use clap_complete::engine::ArgValueCompleter;
 use eyre::eyre;
 
 use crate::ansi::{RED, RESET, YELLOW};
 use crate::cli::State;
-use crate::complete;
 use crate::run::Runner;
 use crate::workspace::Workspace;
 
 use super::prune::{Cleanup, confirm};
 
-/// Destroy a workspace by name, removing its containers and worktree.
-///
-/// Unlike `prune`, this does not skip dirty or in-use workspaces.
+/// Destroy a workspace by name, removing its containers and worktree
 #[derive(Debug, Args)]
 pub struct Kill {
-    #[arg(help = "name of the workspace to destroy", add = ArgValueCompleter::new(complete::complete_workspace))]
-    name: String,
-
-    #[arg(short, long, help = "force remove worktrees")]
+    /// force remove worktrees
+    #[arg(short, long)]
     force: bool,
 }
 
 impl Kill {
     pub async fn run(self, state: State) -> eyre::Result<()> {
-        let workspace = Workspace::get(&state, &self.name).await?;
+        let name = state.resolve_workspace().await?;
+        let workspace = Workspace::get(&state, &name).await?;
 
         let is_root = workspace.path == state.project.path;
 
         if !workspace.path.exists() {
-            return Err(eyre!("no workspace named '{}' found", self.name));
+            return Err(eyre!("no workspace named '{}' found", name));
         }
 
         if is_root {

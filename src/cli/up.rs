@@ -1,7 +1,6 @@
 use std::path::{Path, PathBuf};
 
 use clap::Args;
-use clap_complete::engine::ArgValueCompleter;
 use color_eyre::owo_colors::OwoColorize;
 use eyre::{WrapErr, eyre};
 use serde_json::json;
@@ -12,7 +11,6 @@ use crate::cli::State;
 use crate::cli::copy::copy_volumes;
 use crate::cli::exec::exec_interactive;
 use crate::cli::fwd::forward;
-use crate::complete;
 use crate::devcontainer::{Common, Compose};
 use crate::run::Runner;
 use crate::run::cmd::{Cmd, NamedCmd};
@@ -21,23 +19,19 @@ use crate::worktree;
 /// Spin up a devcontainer, or restart an existing one
 #[derive(Debug, Args)]
 pub struct Up {
-    /// name of workspace [default: current working directory]
-    #[arg(add = ArgValueCompleter::new(complete::complete_workspace))]
-    name: Option<String>,
-
     /// Copy defaultCopyVolumes from root workspace
     #[arg(short, long)]
     copy: bool,
 
-    /// Foward configured port(s) once up.
+    /// Foward devcontainer `forwardPorts` once up
     #[arg(short, long)]
     forward: bool,
 
-    /// Detach worktree rather than creating a branch.
+    /// Detach worktree rather than creating a branch
     #[arg(short, long)]
     detach: bool,
 
-    /// exec into it once up with the given command [default: Configured defaultExec]
+    /// exec once up with the given command [default: configured defaultExec]
     #[arg(short = 'x', long, num_args = 0.., allow_hyphen_values = true)]
     exec: Option<Vec<String>>,
 }
@@ -47,7 +41,7 @@ impl Up {
         let dc = state.devcontainer()?;
         let dc_options = &dc.common.customizations.dc;
 
-        let name = state.resolve_name(self.name).await?;
+        let name = state.resolve_workspace().await?;
         let is_root = state.is_root(&name);
         let worktree_path = if is_root {
             state.project.path.clone()
@@ -265,7 +259,11 @@ fn write_compose_override(
     Ok(override_path)
 }
 
-fn compose_base_args(compose: &Compose, worktree_path: &Path, override_file: &Path) -> Vec<String> {
+pub(crate) fn compose_base_args(
+    compose: &Compose,
+    worktree_path: &Path,
+    override_file: Option<&Path>,
+) -> Vec<String> {
     let mut args = vec![
         "compose".into(),
         "-p".into(),
@@ -281,8 +279,10 @@ fn compose_base_args(compose: &Compose, worktree_path: &Path, override_file: &Pa
                 .into_owned(),
         );
     }
-    args.push("-f".into());
-    args.push(override_file.to_string_lossy().into_owned());
+    if let Some(override_file) = override_file {
+        args.push("-f".into());
+        args.push(override_file.to_string_lossy().into_owned());
+    }
     args
 }
 
@@ -292,7 +292,11 @@ async fn compose_up(
     override_file: &Path,
 ) -> eyre::Result<()> {
     let mut args = vec1::vec1!["docker".into()];
-    args.extend(compose_base_args(compose, worktree_path, override_file));
+    args.extend(compose_base_args(
+        compose,
+        worktree_path,
+        Some(override_file),
+    ));
     args.extend(["up".into(), "-d".into(), "--build".into()]);
 
     if let Some(ref services) = compose.run_services {
@@ -316,7 +320,7 @@ async fn compose_ps_q(
     worktree_path: &Path,
     override_file: &Path,
 ) -> eyre::Result<String> {
-    let mut args = compose_base_args(compose, worktree_path, override_file);
+    let mut args = compose_base_args(compose, worktree_path, Some(override_file));
     args.extend(["ps".into(), "-q".into(), compose.service.clone()]);
 
     let out = tokio::process::Command::new("docker")

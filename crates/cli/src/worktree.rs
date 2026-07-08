@@ -8,7 +8,11 @@ use crate::helpers::validate_name;
 use crate::run::run_cmd;
 use crate::workspace::Workspace;
 
-pub(crate) async fn create(workspace: &Workspace<'_>, detach: bool) -> eyre::Result<()> {
+pub(crate) async fn create(
+    workspace: &Workspace<'_>,
+    detach: bool,
+    branch: Option<&str>,
+) -> eyre::Result<()> {
     validate_name(&workspace.name).map_err(|e| eyre::eyre!("invalid workspace name: {e}"))?;
 
     let root_path = &workspace.state.project.path;
@@ -30,6 +34,12 @@ pub(crate) async fn create(workspace: &Workspace<'_>, detach: bool) -> eyre::Res
         if detach {
             args.push("--detach");
         }
+
+        if let Some(b) = branch {
+            args.push("-b");
+            args.push(b);
+        }
+
         workspace.state.ensure_project_working_dir()?;
         run_cmd(&args, Some(root_path)).await?;
     }

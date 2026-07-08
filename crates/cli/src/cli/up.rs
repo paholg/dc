@@ -28,6 +28,10 @@ pub(crate) struct Up {
     #[arg(short, long)]
     detach: bool,
 
+    /// Specify a branch instead of using the worktree name
+    #[arg(short, long)]
+    branch: Option<String>,
+
     /// Navigate to the directory after creating (if using via shell wrapper)
     #[arg(short, long)]
     go: bool,
@@ -71,7 +75,7 @@ impl Up {
         let _guard = span.enter();
 
         if !workspace.is_root {
-            worktree::create(&workspace, self.detach).await?;
+            worktree::create(&workspace, self.detach, self.branch.as_deref()).await?;
         }
 
         if !state.has_devcontainer() {

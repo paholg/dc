@@ -11,8 +11,9 @@ use crate::error::Result;
 use crate::filter::{Filter, FilterSliceExt};
 use crate::request_ext::ReqwestExt;
 
-/// Treat a JSON `null` as the type's `Default`. Docker uses `null` for empty
-/// collections in some places (e.g. `"ExecIDs": null`), and bare `default`
+/// Treat a JSON `null` as the type's `Default`. Docker is written in Go, whose
+/// `encoding/json` marshals a nil map or slice as `null` rather than `{}` or
+/// `[]`, so any collection in a response can arrive as `null`. Bare `default`
 /// only handles missing fields.
 fn null_as_default<'de, T, D>(d: D) -> std::result::Result<T, D::Error>
 where
@@ -46,6 +47,7 @@ pub struct ContainerDetails {
     pub created: String,
     pub state: ContainerState,
     pub config: ContainerConfig,
+    #[serde(default, deserialize_with = "null_as_default")]
     pub network_settings: NetworkSettings,
     #[serde(rename = "ExecIDs", default, deserialize_with = "null_as_default")]
     pub exec_ids: Vec<String>,
@@ -83,9 +85,9 @@ pub struct ContainerConfig {
     /// Image reference as given at create time (e.g. `ghcr.io/foo/bar:1.2.3`).
     #[serde(default)]
     pub image: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub env: Vec<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub labels: IndexMap<String, String>,
 }
 
@@ -107,7 +109,7 @@ impl ContainerConfig {
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "PascalCase")]
 pub struct NetworkSettings {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub networks: IndexMap<String, EndpointSettings>,
 }
 
@@ -122,16 +124,16 @@ pub struct EndpointSettings {
 #[serde(rename_all = "PascalCase")]
 pub struct ContainerSummary {
     pub id: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub names: Vec<String>,
     pub image: String,
     pub state: ContainerStatus,
     pub created: i64,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub labels: IndexMap<String, String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub ports: Vec<Port>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub network_settings: NetworkSettings,
 }
 
@@ -313,7 +315,7 @@ struct HostConfig<'a> {
 #[serde(rename_all = "PascalCase")]
 struct CreateResponse {
     id: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     warnings: Vec<String>,
 }
 
@@ -426,5 +428,29 @@ mod tests {
         )
         .expect("deserialize");
         assert_eq!(port.ip, Some("0.0.0.0".parse().unwrap()));
+    }
+
+    /// A proxy sidecar joins its target's netns and declares no ports, so
+    /// Docker reports these collections as `null`.
+    #[test]
+    fn container_summary_null_collections_are_empty() {
+        let summary: ContainerSummary = serde_json::from_str(
+            r#"{
+                "Id": "a9231c73f6cc",
+                "Names": null,
+                "Image": "ghcr.io/paholg/devconcurrent-proxy:0.0.20",
+                "State": "running",
+                "Created": 1786469264,
+                "Labels": null,
+                "Ports": null,
+                "NetworkSettings": null
+            }"#,
+        )
+        .expect("deserialize");
+
+        assert!(summary.names.is_empty());
+        assert!(summary.labels.is_empty());
+        assert!(summary.ports.is_empty());
+        assert!(summary.network_settings.networks.is_empty());
     }
 }

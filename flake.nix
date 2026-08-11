@@ -132,6 +132,7 @@
               just
               nodejs
               pandoc
+              rumdl
             ]
             ++ [ rust ];
           env = {

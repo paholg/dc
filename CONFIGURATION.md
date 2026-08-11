@@ -10,9 +10,8 @@ We'll cover both here.
 ## Devconcurrent configuration
 
 This file is located in the config directory reported by the
-[`directories`](https://docs.rs/directories) crate, which is *not*
-`$XDG_CONFIG_HOME` on every platform. On macOS, for example, it lives under
-`~/Library/Application Support/devconcurrent/`. See the
+[`directories`](https://docs.rs/directories) crate, in `$XDG_CONFIG_HOME` or
+your platform's equivalent. See the
 [README](./README.md#configuration) for the full table.
 
 First, if you use [tombi](https://tombi-toml.github.io/tombi/), then it's

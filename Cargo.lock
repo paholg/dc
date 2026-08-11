@@ -867,7 +867,7 @@ dependencies = [
 
 [[package]]
 name = "devconcurrent"
-version = "0.0.20"
+version = "0.0.21"
 dependencies = [
  "clap",
  "clap_complete",
@@ -910,7 +910,7 @@ dependencies = [
 
 [[package]]
 name = "devconcurrent-proxy"
-version = "0.0.20"
+version = "0.0.21"
 dependencies = [
  "async-trait",
  "axum",

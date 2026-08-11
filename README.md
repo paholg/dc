@@ -69,8 +69,23 @@ source <(COMPLETE=zsh devconcurrent)
 In order to give you a nice experience, we require a very simple configuration
 file that just lists your projects.
 
-In your platform's standard config directory, in `devconcurrent/config.toml`,
-place a file like this:
+Devconcurrent reads `config.toml` from the config directory reported by the
+[`directories`](https://docs.rs/directories) crate. That is not the same place
+on every platform:
+
+| Platform | Path                                                      |
+| -------- | --------------------------------------------------------- |
+| Linux    | `$XDG_CONFIG_HOME/devconcurrent/config.toml`               |
+| macOS    | `~/Library/Application Support/devconcurrent/config.toml`  |
+| Windows  | `%APPDATA%\devconcurrent\config\config.toml`               |
+
+On Linux, `$XDG_CONFIG_HOME` is usually `~/.config`. Note that macOS does not
+use `~/.config` here, and that Windows adds a `config` subdirectory.
+
+If you are unsure, run any `devconcurrent` command with no config file in
+place; the error names the exact path it looked for.
+
+Place a file like this there:
 
 ```toml
 #:schema https://raw.githubusercontent.com/paholg/devconcurrent/refs/heads/main/devconcurrent.schema.json

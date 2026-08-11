@@ -1,7 +1,7 @@
 # Devconcurrent Configuration
 
-You can configure devconcurrent in two places. First, you need at least the file
-`devconcurrent/config.toml` in your platform's standard config directory.
+You can configure devconcurrent in two places. First, you need at least a
+`config.toml` in devconcurrent's config directory, which varies by platform.
 
 Second, devconcurrent provides some options via devcontainer customizations.
 
@@ -9,8 +9,11 @@ We'll cover both here.
 
 ## Devconcurrent configuration
 
-This file is located at `devconcurrent/config.toml`, in `$XDG_CONFIG_HOME` or
-your platform's equivalent.
+This file is located in the config directory reported by the
+[`directories`](https://docs.rs/directories) crate, which is *not*
+`$XDG_CONFIG_HOME` on every platform. On macOS, for example, it lives under
+`~/Library/Application Support/devconcurrent/`. See the
+[README](./README.md#configuration) for the full table.
 
 First, if you use [tombi](https://tombi-toml.github.io/tombi/), then it's
 recommended you start this config with the line
@@ -28,7 +31,8 @@ Here are the options:
 * `projects.FOO` - configure project FOO.
   * `path` - the location of the git repository.
   * `worktreeFolder` - the directory where devconcurrent will place worktrees;
-    defaults to `$XDG_DATA_HOME/devconcurrent` or similar.
+    defaults to the platform data directory: `$XDG_DATA_HOME/devconcurrent` on
+    Linux, `~/Library/Application Support/devconcurrent` on macOS.
   * `devcontainer` - specify any of the options for [devcontainer.json](https://containers.dev/implementors/json_reference/).
     These will be merged with the project's `devcontainer.json` file, with
     arrays being merged, and settings from this file otherwise taking precedence.

@@ -74,7 +74,9 @@ async fn main() -> Result<()> {
         tracing::warn!("orphan sweep failed: {e:?}");
     }
 
-    let dns_bind = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), dns_port);
+    // All interfaces: the port is published by the CLI, which is where the
+    // host-side listen address is restricted.
+    let dns_bind = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), dns_port);
 
     let dns_task = tokio::spawn({
         let registry = registry.clone();

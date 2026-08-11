@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::net::{IpAddr, Ipv4Addr};
 use std::sync::LazyLock;
 use std::time::Duration;
 
@@ -14,6 +15,7 @@ use shared::{
     ENV_CA_DIR, ENV_DNS_PORT, PROXY_CA_DIR, PROXY_CONFIG_DIR, PROXY_CONFIG_VOLUME,
     PROXY_CONTAINER_NAME, ProxyService,
 };
+use tokio::net::UdpSocket;
 
 use crate::complete::complete_workspace;
 use crate::run::{Runnable, Runner};
@@ -27,6 +29,19 @@ const PROXY_IMAGE_NAME: &str = "ghcr.io/paholg/devconcurrent-proxy";
 
 /// We keep the proxy and CLI versions in sync, so using the CLI version here is fine.
 const PROXY_IMAGE_TAG: &str = env!("CARGO_PKG_VERSION");
+
+/// Host address the DNS port is published on.
+const LISTEN_IP: IpAddr = IpAddr::V4(Ipv4Addr::LOCALHOST);
+
+/// Name queried to check that the proxy is answering; it resolves to nothing.
+const PROBE_NAME: &str = "readiness-probe.devconcurrent.test";
+const PROBE_TIMEOUT: Duration = Duration::from_millis(100);
+const DNS_HEADER_LEN: usize = 12;
+
+/// How long the proxy gets to answer a query after being started. Generous:
+/// before it binds its sockets it adopts every running service container, which
+/// takes a while with a lot of workspaces up.
+const READY_TIMEOUT: Duration = Duration::from_secs(30);
 
 static PROXY_IMAGE: LazyLock<String> =
     LazyLock::new(|| format!("{PROXY_IMAGE_NAME}:{PROXY_IMAGE_TAG}"));
@@ -113,7 +128,7 @@ async fn proxy_up(proxy: &ProxyState) -> Result<()> {
         .await
         .wrap_err("start proxy container")?;
 
-    wait_for_running(&proxy.docker, &id).await?;
+    wait_for_ready(&proxy.docker, &id, proxy.config.port).await?;
 
     tracing::info!("{} proxy is running", "✓".green());
     Ok(())
@@ -356,30 +371,87 @@ fn fmt_ports(svc: Option<&ProxyService>) -> String {
     }
 }
 
-async fn wait_for_running(docker: &Docker, id: &str) -> Result<()> {
-    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+/// Wait for the proxy to answer DNS queries.
+///
+/// Neither of the cheap signals means ready: docker reports the container
+/// running the moment its entrypoint execs, and a published port accepts
+/// connections whether or not anything in the container is listening yet. Only
+/// a reply proves it.
+async fn wait_for_ready(docker: &Docker, id: &str, port: u16) -> Result<()> {
+    let timeout = READY_TIMEOUT.as_secs();
+    let deadline = std::time::Instant::now() + READY_TIMEOUT;
     loop {
         match docker.inspect_container(id).await {
-            Ok(d) if d.state.running => return Ok(()),
+            Ok(d) if d.state.running => break,
             Ok(_) => {}
             Err(docker::Error::NotFound) => eyre::bail!("proxy container vanished after start"),
             Err(e) => return Err(e).wrap_err("inspect proxy after start"),
         }
         if std::time::Instant::now() >= deadline {
-            eyre::bail!("proxy container did not reach running state within 5s");
+            eyre::bail!("proxy container did not reach running state within {timeout}s");
         }
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
+
+    let socket = UdpSocket::bind((LISTEN_IP, 0))
+        .await
+        .wrap_err("bind dns probe socket")?;
+    socket
+        .connect((LISTEN_IP, port))
+        .await
+        .wrap_err("connect dns probe socket")?;
+
+    let query = dns_query(rand::random(), PROBE_NAME);
+    let mut response = [0u8; 512];
+    loop {
+        // Errors here are all "not up yet": the proxy drops the packet, or
+        // docker's forwarder rejects it because nothing is listening behind it.
+        if socket.send(&query).await.is_ok()
+            && let Ok(Ok(len)) =
+                tokio::time::timeout(PROBE_TIMEOUT, socket.recv(&mut response)).await
+            && len >= DNS_HEADER_LEN
+            && response[..2] == query[..2]
+        {
+            return Ok(());
+        }
+        if std::time::Instant::now() >= deadline {
+            eyre::bail!("proxy did not answer a dns query on port {port} within {timeout}s");
+        }
+        // A failed send returns immediately, so pace the retries ourselves.
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
+/// A minimal `<name> A IN` query packet, used to check that the proxy is
+/// answering. The name need not exist; an NXDOMAIN is just as good an answer.
+fn dns_query(id: u16, name: &str) -> Vec<u8> {
+    let mut query = Vec::new();
+    query.extend_from_slice(&id.to_be_bytes());
+    query.extend_from_slice(&[0x01, 0x00]); // standard query, recursion desired
+    query.extend_from_slice(&[0x00, 0x01]); // one question
+    query.extend_from_slice(&[0x00; 6]); // no answer, authority, or additional records
+    for label in name.split('.') {
+        query.push(u8::try_from(label.len()).expect("PROBE_NAME has short labels"));
+        query.extend_from_slice(label.as_bytes());
+    }
+    query.push(0); // root label
+    query.extend_from_slice(&[0x00, 0x01]); // qtype: A
+    query.extend_from_slice(&[0x00, 0x01]); // qclass: IN
+    query
 }
 
 async fn create_proxy_stopped(proxy: &ProxyState) -> Result<String> {
     let socket_path = proxy.docker.socket().display();
 
+    // The DNS port is published rather than the container sharing the host's
+    // network namespace: on macOS and Windows the "host" of a host-networked
+    // container is Docker's VM, not the machine the user's resolver runs on.
     let mut builder = proxy
         .docker
         .create_container(PROXY_CONTAINER_NAME)
         .image(&PROXY_IMAGE)
-        .network_mode("host")
+        .with_udp_port_binding(proxy.config.port, LISTEN_IP, proxy.config.port)
+        .with_tcp_port_binding(proxy.config.port, LISTEN_IP, proxy.config.port)
         .with_label(PROXY_LABEL, "true")
         .with_label(PROXY_GROUP_LABEL, "true")
         .with_label(PROXY_CONFIG_HASH_LABEL, proxy.config_hash())
@@ -394,4 +466,31 @@ async fn create_proxy_stopped(proxy: &ProxyState) -> Result<String> {
     }
 
     builder.call().await.wrap_err("create proxy container")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dns_query_is_a_well_formed_question() {
+        let query = dns_query(0xbeef, "foo.test");
+        assert_eq!(
+            query,
+            [
+                0xbe, 0xef, // id
+                0x01, 0x00, // flags
+                0x00, 0x01, // qdcount
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // an/ns/ar count
+                3, b'f', b'o', b'o', 4, b't', b'e', b's', b't', 0, // qname
+                0x00, 0x01, // qtype: A
+                0x00, 0x01, // qclass: IN
+            ]
+        );
+    }
+
+    #[test]
+    fn probe_name_labels_fit_in_a_length_byte() {
+        dns_query(0, PROBE_NAME);
+    }
 }

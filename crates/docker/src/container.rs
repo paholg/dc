@@ -389,13 +389,33 @@ impl<S: docker_create_container_builder::State> DockerCreateContainerBuilder<'_,
 
     /// Publish `container_port/tcp` to `host_ip:host_port` on the host.
     pub fn with_tcp_port_binding(
-        mut self,
+        self,
         container_port: u16,
         host_ip: IpAddr,
         host_port: u16,
     ) -> Self {
+        self.with_port_binding(container_port, "tcp", host_ip, host_port)
+    }
+
+    /// Publish `container_port/udp` to `host_ip:host_port` on the host.
+    pub fn with_udp_port_binding(
+        self,
+        container_port: u16,
+        host_ip: IpAddr,
+        host_port: u16,
+    ) -> Self {
+        self.with_port_binding(container_port, "udp", host_ip, host_port)
+    }
+
+    fn with_port_binding(
+        mut self,
+        container_port: u16,
+        protocol: &str,
+        host_ip: IpAddr,
+        host_port: u16,
+    ) -> Self {
         self.port_bindings
-            .entry(format!("{container_port}/tcp"))
+            .entry(format!("{container_port}/{protocol}"))
             .or_default()
             .push(PortBindingEntry { host_ip, host_port });
         self

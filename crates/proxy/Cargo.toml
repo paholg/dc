@@ -1,6 +1,6 @@
 [package]
 name = "devconcurrent-proxy"
-version = "0.0.22"
+version = "0.0.23"
 edition = "2024"
 description = "DNS resolver for devconcurrent devcontainers"
 publish = false

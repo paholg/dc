@@ -359,6 +359,10 @@ Assuming you are using the default settings, have workspace `foo` and container
 devconcurrent's DNS server. Then `dig +short foo.app.test` should reveal the
 container's IP address!
 
+On MacOs, use `dscacheutil -q host -a name foo.app.test` instead. `dig` reads
+`/etc/resolv.conf` and asks those servers directly; it never looks at
+`/etc/resolver`, so it will report nothing here even when everything is working.
+
 You can now reference containers by hostname. For example, if you have a
 database at compose service `postgres`, you can set your database url to
 `$(devconcurrent show workspace).postgres.test` or just

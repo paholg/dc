@@ -16,11 +16,10 @@ const PROBE_TIMEOUT_AFTER: Duration = Duration::from_secs(10);
 #[derive(Debug, Clone)]
 pub(crate) struct ContainerData {
     pub(crate) env: IndexMap<String, String>,
-    pub(crate) labels: IndexMap<String, String>,
 }
 
 impl ContainerData {
-    /// Read `Config.Env` and `Config.Labels` from the container.
+    /// Read `Config.Env` from the container.
     pub(crate) async fn inspect(client: &docker::Docker, container_id: &str) -> eyre::Result<Self> {
         let details = client
             .inspect_container(container_id)
@@ -28,26 +27,25 @@ impl ContainerData {
             .wrap_err_with(|| format!("failed to inspect container {container_id}"))?;
         Ok(Self {
             env: details.config.parsed_env(),
-            labels: details.config.labels,
         })
     }
+}
 
-    /// Compute `${devcontainerId}`: SHA-256 of the JSON-encoded `devcontainer.*` labels (with
-    /// keys sorted), interpreted as a big-endian unsigned integer and base-32 encoded, padded
-    /// to 52 chars. Mirrors [the reference impl][ref].
-    ///
-    /// [ref]: https://github.com/devcontainers/cli/blob/main/src/spec-common/variableSubstitution.ts
-    pub(crate) fn devcontainer_id(&self) -> String {
-        let id_labels: BTreeMap<&str, &str> = self
-            .labels
-            .iter()
-            .filter(|(key, _)| key.starts_with("devcontainer."))
-            .map(|(key, value)| (key.as_str(), value.as_str()))
-            .collect();
-        let json = serde_json::to_string(&id_labels).expect("string-keyed map always serializes");
-        let digest = Sha256::digest(json.as_bytes());
-        format!("{:0>52}", BigUint::from_bytes_be(&digest).to_str_radix(32))
-    }
+/// Compute `${devcontainerId}`: SHA-256 of the JSON-encoded `devcontainer.*` labels (with
+/// keys sorted), interpreted as a big-endian unsigned integer and base-32 encoded, padded
+/// to 52 chars. Mirrors [the reference impl][ref].
+///
+/// Takes labels rather than a container so the id is available before one exists; the labels
+/// are ours to begin with, written into the compose override.
+///
+/// [ref]: https://github.com/devcontainers/cli/blob/main/src/spec-common/variableSubstitution.ts
+pub(crate) fn devcontainer_id<'a>(labels: impl Iterator<Item = (&'a str, &'a str)>) -> String {
+    let id_labels: BTreeMap<&str, &str> = labels
+        .filter(|(key, _)| key.starts_with("devcontainer."))
+        .collect();
+    let json = serde_json::to_string(&id_labels).expect("string-keyed map always serializes");
+    let digest = Sha256::digest(json.as_bytes());
+    format!("{:0>52}", BigUint::from_bytes_be(&digest).to_str_radix(32))
 }
 
 /// Run the configured `userEnvProbe` against `container_id`. Returns an empty map for
@@ -222,27 +220,20 @@ fn parse_marked_env(stdout: &[u8], mark: &str) -> eyre::Result<IndexMap<String, 
 mod tests {
     use super::*;
 
-    fn map(pairs: &[(&str, &str)]) -> IndexMap<String, String> {
-        pairs
-            .iter()
-            .map(|(key, value)| (key.to_string(), value.to_string()))
-            .collect()
+    fn id(labels: &[(&str, &str)]) -> String {
+        devcontainer_id(labels.iter().copied())
     }
 
     #[test]
     fn devcontainer_id_format() {
-        let data = ContainerData {
-            env: IndexMap::new(),
-            labels: map(&[
-                ("devcontainer.local_folder", "/host/projects/myrepo"),
-                (
-                    "devcontainer.config_file",
-                    "/host/projects/myrepo/.devcontainer/devcontainer.json",
-                ),
-                ("dev.devconcurrent.project", "myrepo"),
-            ]),
-        };
-        let id = data.devcontainer_id();
+        let id = id(&[
+            ("devcontainer.local_folder", "/host/projects/myrepo"),
+            (
+                "devcontainer.config_file",
+                "/host/projects/myrepo/.devcontainer/devcontainer.json",
+            ),
+            ("dev.devconcurrent.project", "myrepo"),
+        ]);
         assert_eq!(id.len(), 52);
         assert!(
             id.chars().all(|c| matches!(c, '0'..='9' | 'a'..='v')),
@@ -252,21 +243,16 @@ mod tests {
 
     #[test]
     fn devcontainer_id_stable_across_label_order() {
-        let a = ContainerData {
-            env: IndexMap::new(),
-            labels: map(&[
+        assert_eq!(
+            id(&[
                 ("devcontainer.local_folder", "/foo"),
                 ("devcontainer.config_file", "/foo/.devcontainer.json"),
             ]),
-        };
-        let b = ContainerData {
-            env: IndexMap::new(),
-            labels: map(&[
+            id(&[
                 ("devcontainer.config_file", "/foo/.devcontainer.json"),
                 ("devcontainer.local_folder", "/foo"),
             ]),
-        };
-        assert_eq!(a.devcontainer_id(), b.devcontainer_id());
+        );
     }
 
     #[test]
@@ -382,17 +368,12 @@ mod tests {
 
     #[test]
     fn devcontainer_id_ignores_non_id_labels() {
-        let base = ContainerData {
-            env: IndexMap::new(),
-            labels: map(&[("devcontainer.local_folder", "/foo")]),
-        };
-        let with_extra = ContainerData {
-            env: IndexMap::new(),
-            labels: map(&[
+        assert_eq!(
+            id(&[("devcontainer.local_folder", "/foo")]),
+            id(&[
                 ("devcontainer.local_folder", "/foo"),
                 ("dev.devconcurrent.project", "anything"),
             ]),
-        };
-        assert_eq!(base.devcontainer_id(), with_extra.devcontainer_id());
+        );
     }
 }

@@ -6,12 +6,12 @@ use serde::{Deserialize, Serialize};
 use shared::ProxyOptions;
 
 use crate::helpers::deserialize_shell_path_opt;
-use crate::run::cmd::Cmd;
+use crate::run::cmd::CmdTemplate;
 
 #[derive(Deserialize, Serialize, Debug, Clone, Default, JsonSchema)]
 #[serde(rename_all = "camelCase", default)]
 pub(crate) struct DcOptions {
-    pub(crate) default_exec: Option<Cmd>,
+    pub(crate) default_exec: Option<CmdTemplate>,
     #[serde(deserialize_with = "deserialize_shell_path_opt")]
     pub(crate) worktree_folder: Option<PathBuf>,
     /// Whether to mount the project's git directory into each workspace's devcontainer.

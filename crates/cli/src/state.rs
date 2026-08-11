@@ -8,7 +8,7 @@ use eyre::OptionExt;
 
 use crate::{
     config::{Config, Project, ProjectName},
-    devcontainer::{DevcontainerConfig, dc_options::DcOptions},
+    devcontainer::{DevcontainerConfig, DevcontainerLabels, dc_options::DcOptions, substitution},
     docker::DockerClient,
     workspace::Workspace,
     worktree,
@@ -22,9 +22,13 @@ pub(crate) struct State<'a> {
 }
 
 pub(crate) struct DevcontainerState {
-    pub(crate) path: Option<PathBuf>,
     pub(crate) config: DevcontainerConfig,
     pub(crate) docker: Arc<DockerClient>,
+    pub(crate) labels: DevcontainerLabels,
+    /// `workspaceFolder` with its variables resolved. It is what
+    /// `${containerWorkspaceFolder}` expands to everywhere else, so it is
+    /// rendered here, once, before any other field.
+    pub(crate) workspace_folder: PathBuf,
 }
 
 impl DevcontainerState {
@@ -35,11 +39,31 @@ impl DevcontainerState {
         };
         let docker = DockerClient::new().await?;
 
-        Ok(Some(Self {
-            path,
+        Self::assemble(path, config, Arc::new(docker), project.path.clone()).map(Some)
+    }
+
+    fn assemble(
+        path: Option<PathBuf>,
+        config: DevcontainerConfig,
+        docker: Arc<DockerClient>,
+        local_folder: PathBuf,
+    ) -> eyre::Result<Self> {
+        let labels = DevcontainerLabels::new(local_folder, path);
+        let workspace_folder = resolve_workspace_folder(&config, &labels)?;
+
+        Ok(Self {
             config,
-            docker: Arc::new(docker),
-        }))
+            docker,
+            labels,
+            workspace_folder,
+        })
+    }
+
+    /// A rendering context with everything but `${containerEnv:…}`, which needs
+    /// a container to read from.
+    pub(crate) fn context<'a>(&'a self, local_folder: &'a Path) -> substitution::Context<'a> {
+        substitution::Context::new(local_folder, &self.labels)
+            .with_container_workspace_folder(&self.workspace_folder)
     }
 
     pub(crate) fn devconcurrent(&self) -> &DcOptions {
@@ -49,6 +73,16 @@ impl DevcontainerState {
     pub(crate) fn proxy_enabled(&self) -> bool {
         self.devconcurrent().proxy.enable
     }
+}
+
+/// Render `workspaceFolder` in the local phase: it is what defines the
+/// container workspace folder, and no container exists yet.
+fn resolve_workspace_folder(
+    config: &DevcontainerConfig,
+    labels: &DevcontainerLabels,
+) -> eyre::Result<PathBuf> {
+    substitution::Context::new(labels.local_folder(), labels)
+        .render_path("workspaceFolder", &config.workspace_folder)
 }
 
 impl<'a> State<'a> {
@@ -211,10 +245,59 @@ impl<'a> State<'a> {
             )
         })?;
 
-        Ok(DevcontainerState {
+        DevcontainerState::assemble(
             path,
             config,
-            docker: root.docker.clone(),
-        })
+            root.docker.clone(),
+            workspace_path.to_path_buf(),
+        )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::devcontainer::DevcontainerConfig;
+
+    fn config(workspace_folder: &str) -> DevcontainerConfig {
+        serde_json::from_value(serde_json::json!({
+            "dockerComposeFile": "docker-compose.yml",
+            "service": "app",
+            "workspaceFolder": workspace_folder,
+        }))
+        .expect("valid devcontainer config")
+    }
+
+    fn labels() -> DevcontainerLabels {
+        DevcontainerLabels::new(PathBuf::from("/host/worktrees/feature3"), None)
+    }
+
+    /// The whole point for worktrees: one config, a folder per workspace.
+    #[test]
+    fn workspace_folder_takes_the_worktree_name() {
+        let folder = resolve_workspace_folder(
+            &config("/workspaces/${localWorkspaceFolderBasename}"),
+            &labels(),
+        )
+        .expect("variables are available");
+        assert_eq!(folder, PathBuf::from("/workspaces/feature3"));
+    }
+
+    #[test]
+    fn workspace_folder_cannot_refer_to_itself() {
+        let err = resolve_workspace_folder(&config("${containerWorkspaceFolder}/sub"), &labels())
+            .expect_err("the field defines the variable");
+        let err = format!("{err:#}");
+        assert!(err.contains("workspaceFolder"), "{err}");
+        assert!(err.contains("cannot refer to itself"), "{err}");
+    }
+
+    #[test]
+    fn workspace_folder_cannot_read_container_env() {
+        let err = resolve_workspace_folder(&config("${containerEnv:HOME}"), &labels())
+            .expect_err("no container exists yet");
+        let err = format!("{err:#}");
+        assert!(err.contains("workspaceFolder"), "{err}");
+        assert!(err.contains("no container exists"), "{err}");
     }
 }

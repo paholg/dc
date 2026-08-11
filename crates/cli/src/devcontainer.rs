@@ -20,9 +20,50 @@ mod unsupported;
 use crate::{
     config::Project,
     devcontainer::{dc_options::DcOptions, forward_port::ForwardPort, substitution::Template},
+    docker::probe,
 };
-use lifecycle_command::LifecycleCommand;
+use lifecycle_command::LifecycleCommandTemplate;
 use unsupported::Unsupported;
+
+/// The `devcontainer.*` labels we stamp on the primary service container.
+///
+/// They are what the spec's tooling identifies a dev container by, and the
+/// input to `${devcontainerId}`. We write them ourselves in the compose
+/// override, so the id is known before any container exists.
+#[derive(Debug, Clone)]
+pub(crate) struct DevcontainerLabels {
+    local_folder: PathBuf,
+    config_file: Option<PathBuf>,
+}
+
+impl DevcontainerLabels {
+    pub(crate) fn new(local_folder: PathBuf, config_file: Option<PathBuf>) -> Self {
+        Self {
+            local_folder,
+            config_file,
+        }
+    }
+
+    pub(crate) fn local_folder(&self) -> &Path {
+        &self.local_folder
+    }
+
+    pub(crate) fn pairs(&self) -> Vec<(&'static str, String)> {
+        let mut pairs = vec![(
+            docker::LOCAL_FOLDER_LABEL,
+            self.local_folder.display().to_string(),
+        )];
+        if let Some(config_file) = &self.config_file {
+            pairs.push((docker::CONFIG_FILE_LABEL, config_file.display().to_string()));
+        }
+        pairs
+    }
+
+    pub(crate) fn devcontainer_id(&self) -> String {
+        let pairs = self.pairs();
+        probe::devcontainer_id(pairs.iter().map(|(key, value)| (*key, value.as_str())))
+    }
+}
 
 /// Devcontainer config from devcontainer.json.
 #[serde_as]
@@ -33,7 +74,7 @@ pub(crate) struct DevcontainerConfig {
     // Compose section
     /// The name of the docker-compose file(s) used to start the services.
     #[serde_as(as = "OneOrMany<_>")]
-    pub(crate) docker_compose_file: Vec<String>,
+    pub(crate) docker_compose_file: Vec<Template>,
     /// The service you want to work on. This is considered the primary container for your dev
     /// environment which your editor will connect to.
     pub(crate) service: String,
@@ -42,7 +83,7 @@ pub(crate) struct DevcontainerConfig {
     pub(crate) run_services: Option<Vec<String>>,
     /// The path of the workspace folder inside the container. This is typically the target path of
     /// a volume mount in the docker-compose.yml.
-    pub(crate) workspace_folder: PathBuf,
+    pub(crate) workspace_folder: Template,
     /// Action to take when the user disconnects from the primary container in their editor. The
     /// default is to stop all of the compose containers.
     #[serde(default)]
@@ -56,7 +97,7 @@ pub(crate) struct DevcontainerConfig {
     #[serde(rename = "$schema")]
     pub(crate) schema: Option<String>,
     /// A name for the dev container which can be displayed to the user.
-    pub(crate) name: Option<String>,
+    pub(crate) name: Option<Template>,
     /// Features to add to the dev container.
     #[serde(deserialize_with = "unsupported::features::warn")]
     pub(crate) features: serde_json::Value,
@@ -78,7 +119,7 @@ pub(crate) struct DevcontainerConfig {
     /// Container environment variables.
     pub(crate) container_env: IndexMap<String, Template>,
     /// The user the container will be started with. The default is the user on the Docker image.
-    pub(crate) container_user: Option<String>,
+    pub(crate) container_user: Option<Template>,
     pub(crate) mounts: Vec<MountEntry>,
     /// Passes the --init flag when creating the dev container.
     pub(crate) init: Option<bool>,
@@ -95,27 +136,27 @@ pub(crate) struct DevcontainerConfig {
     /// The username to use for spawning processes in the container including
     /// lifecycle scripts and any remote editor/IDE server process. The default
     /// is the same user as the container.
-    pub(crate) remote_user: Option<String>,
+    pub(crate) remote_user: Option<Template>,
 
     /// A command to run locally (i.e Your host machine, cloud VM) before anything else. This
     /// command is run before "onCreateCommand".
-    pub(crate) initialize_command: Option<LifecycleCommand>,
+    pub(crate) initialize_command: Option<LifecycleCommandTemplate>,
     /// A command to run when creating the container. This command is run after "initializeCommand"
     /// and before "updateContentCommand".
-    pub(crate) on_create_command: Option<LifecycleCommand>,
+    pub(crate) on_create_command: Option<LifecycleCommandTemplate>,
     /// A command to run when creating the container and rerun when the workspace content was
     /// updated while creating the container. This command is run after "onCreateCommand" and before
     /// "postCreateCommand".
-    pub(crate) update_content_command: Option<LifecycleCommand>,
+    pub(crate) update_content_command: Option<LifecycleCommandTemplate>,
     /// A command to run after creating the container. This command is run after
     /// "updateContentCommand" and before "postStartCommand".
-    pub(crate) post_create_command: Option<LifecycleCommand>,
+    pub(crate) post_create_command: Option<LifecycleCommandTemplate>,
     /// A command to run after starting the container. This command is run after "postCreateCommand"
     /// and before "postAttachCommand".
-    pub(crate) post_start_command: Option<LifecycleCommand>,
+    pub(crate) post_start_command: Option<LifecycleCommandTemplate>,
     /// A command to run when attaching to the container. This command is run after
     /// "postStartCommand".
-    pub(crate) post_attach_command: Option<LifecycleCommand>,
+    pub(crate) post_attach_command: Option<LifecycleCommandTemplate>,
     /// The user command to wait for before continuing execution in the background while the UI is
     /// starting up.
     pub(crate) wait_for: WaitFor,
@@ -253,8 +294,10 @@ impl MountEntry {
         context: &substitution::Context<'_>,
     ) -> eyre::Result<String> {
         match self {
-            MountEntry::String(template) => Ok(Mount::parse(&template.render(context))?.render()),
-            MountEntry::Object(mount) => Ok(mount.render_with(context)),
+            MountEntry::String(template) => {
+                Ok(Mount::parse(&context.render_field("mounts", template)?)?.render())
+            }
+            MountEntry::Object(mount) => mount.render_with(context),
         }
     }
 }
@@ -289,13 +332,18 @@ impl Mount {
         })
     }
 
-    fn render_with(&self, context: &substitution::Context<'_>) -> String {
-        MountFields {
+    fn render_with(&self, context: &substitution::Context<'_>) -> eyre::Result<String> {
+        let source = self
+            .source
+            .as_ref()
+            .map(|t| context.render_field("mounts.source", t))
+            .transpose()?;
+        Ok(MountFields {
             ty: self.ty,
-            source: self.source.as_ref().map(|t| t.render(context)),
-            target: self.target.render(context),
+            source,
+            target: context.render_field("mounts.target", &self.target)?,
         }
-        .render()
+        .render())
     }
 }
 
@@ -427,9 +475,14 @@ pub(crate) enum ComposeShutdownAction {
 mod tests {
     use super::*;
     use std::path::Path;
+    use std::sync::LazyLock;
+
+    static LABELS: LazyLock<DevcontainerLabels> =
+        LazyLock::new(|| DevcontainerLabels::new(PathBuf::from("/local"), None));
 
     fn ctx() -> substitution::Context<'static> {
-        substitution::Context::new(Path::new("/local"), Path::new("/container"))
+        substitution::Context::new(Path::new("/local"), &LABELS)
+            .with_container_workspace_folder(Path::new("/container"))
     }
 
     #[test]

@@ -5,13 +5,41 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use vec1::{Vec1, vec1};
 
+use crate::devcontainer::substitution::{Context, Template};
 use crate::run;
 
+/// A command as written in config, before `${...}` substitution.
 #[derive(Debug, Deserialize, Serialize, Clone, JsonSchema)]
 #[serde(untagged)]
+pub(crate) enum CmdTemplate {
+    Shell(Template),
+    #[schemars(with = "Vec<Template>")]
+    Args(Vec1<Template>),
+}
+
+impl CmdTemplate {
+    /// `field` names the config property, so an unavailable variable can say
+    /// where it was written.
+    pub(crate) fn render(&self, field: &str, context: &Context<'_>) -> eyre::Result<Cmd> {
+        match self {
+            CmdTemplate::Shell(prog) => Ok(Cmd::Shell(context.render_field(field, prog)?)),
+            CmdTemplate::Args(args) => {
+                let args: Vec<String> = args
+                    .iter()
+                    .map(|arg| context.render_field(field, arg))
+                    .collect::<eyre::Result<_>>()?;
+                Ok(Cmd::Args(
+                    Vec1::try_from_vec(args).expect("a Vec1 renders to at least one argument"),
+                ))
+            }
+        }
+    }
+}
+
+/// A command ready to run.
+#[derive(Debug, Clone)]
 pub(crate) enum Cmd {
     Shell(String),
-    #[schemars(with = "Vec<String>")]
     Args(Vec1<String>),
 }
 
@@ -58,5 +86,60 @@ impl run::Runnable for NamedCmd<'_> {
     async fn run(self, _: run::Token) -> eyre::Result<()> {
         let argv = self.cmd.as_args();
         super::run_cmd(&argv, self.dir).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::{Path, PathBuf};
+    use std::sync::LazyLock;
+
+    use super::*;
+    use crate::devcontainer::DevcontainerLabels;
+
+    static LABELS: LazyLock<DevcontainerLabels> =
+        LazyLock::new(|| DevcontainerLabels::new(PathBuf::from("/host/myrepo"), None));
+
+    fn ctx() -> Context<'static> {
+        Context::new(Path::new("/host/myrepo"), &LABELS)
+            .with_container_workspace_folder(Path::new("/workspaces/myrepo"))
+    }
+
+    fn render(json: &str) -> Cmd {
+        serde_json::from_str::<CmdTemplate>(json)
+            .expect("valid command")
+            .render("postCreateCommand", &ctx())
+            .expect("variables are available")
+    }
+
+    #[test]
+    fn shell_form_substitutes() {
+        let cmd = render(r#""ls ${containerWorkspaceFolder}""#);
+        assert_eq!(cmd.as_args(), ["/bin/sh", "-c", "ls /workspaces/myrepo"]);
+    }
+
+    #[test]
+    fn each_argument_substitutes_separately() {
+        let cmd =
+            render(r#"["ls", "${containerWorkspaceFolder}", "${localWorkspaceFolderBasename}"]"#);
+        assert_eq!(cmd.as_args(), ["ls", "/workspaces/myrepo", "myrepo"]);
+    }
+
+    /// Shell syntax isn't ours to interpret; only the known variable names are.
+    #[test]
+    fn shell_variables_pass_through() {
+        let cmd = render(r#""echo ${HOME} $PATH""#);
+        assert_eq!(cmd.as_args(), ["/bin/sh", "-c", "echo ${HOME} $PATH"]);
+    }
+
+    #[test]
+    fn an_unavailable_variable_names_the_field() {
+        let err = serde_json::from_str::<CmdTemplate>(r#""echo ${containerEnv:FOO}""#)
+            .expect("valid command")
+            .render("initializeCommand", &ctx())
+            .expect_err("no container env in this context");
+        let err = format!("{err:#}");
+        assert!(err.contains("initializeCommand"), "{err}");
+        assert!(err.contains("${containerEnv:FOO}"), "{err}");
     }
 }

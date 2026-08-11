@@ -13,8 +13,9 @@
 //! - Case sensitive; surrounding whitespace inside `${...}` is not tolerated.
 
 use std::fmt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
+use eyre::WrapErr;
 use indexmap::IndexMap;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use winnow::{
@@ -23,7 +24,16 @@ use winnow::{
     token::{literal, take_till, take_while},
 };
 
-use crate::docker::probe::ContainerData;
+use crate::devcontainer::DevcontainerLabels;
+
+/// Why a container-phase variable isn't resolvable.
+const NO_CONTAINER: &str = "no container exists at this point. It is only available in fields \
+    applied after the container is created, such as `remoteEnv` and the lifecycle commands that \
+    run in the container";
+
+/// Why the container workspace folder isn't resolvable.
+const NO_CONTAINER_WORKSPACE_FOLDER: &str = "the container workspace folder is not known at this \
+    point. `workspaceFolder` is what defines it, so it cannot refer to itself";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Variable {
@@ -48,30 +58,54 @@ pub(crate) enum Segment {
     Var(Variable),
 }
 
+/// What a [`Template`] can be rendered against.
+///
+/// Which variables resolve depends on how far along we are: before the compose
+/// file is written we know only the local side, and `${containerEnv:…}` is not
+/// answerable until a container exists. A variable used outside its phase is an
+/// error rather than an empty string, so a misplaced one is reported instead of
+/// silently producing the wrong value.
 #[derive(Debug, Clone)]
 pub(crate) struct Context<'a> {
     local_env: IndexMap<String, String>,
     local_workspace_folder: &'a Path,
-    container_workspace_folder: &'a Path,
-    container: Option<ContainerData>,
+    labels: &'a DevcontainerLabels,
+    container_workspace_folder: Option<&'a Path>,
+    container_env: Option<&'a IndexMap<String, String>>,
 }
 
 impl<'a> Context<'a> {
-    pub(crate) fn new(
-        local_workspace_folder: &'a Path,
-        container_workspace_folder: &'a Path,
-    ) -> Self {
+    /// The local phase: everything except `${containerEnv:…}` and the container
+    /// workspace folder.
+    pub(crate) fn new(local_workspace_folder: &'a Path, labels: &'a DevcontainerLabels) -> Self {
         Self {
             local_env: std::env::vars().collect(),
             local_workspace_folder,
-            container_workspace_folder,
-            container: None,
+            labels,
+            container_workspace_folder: None,
+            container_env: None,
         }
     }
 
-    pub(crate) fn with_container(mut self, container: ContainerData) -> Self {
-        self.container = Some(container);
+    pub(crate) fn with_container_workspace_folder(mut self, folder: &'a Path) -> Self {
+        self.container_workspace_folder = Some(folder);
         self
+    }
+
+    pub(crate) fn with_container_env(mut self, env: &'a IndexMap<String, String>) -> Self {
+        self.container_env = Some(env);
+        self
+    }
+
+    /// Render `template`, blaming `field` if a variable isn't available here.
+    pub(crate) fn render_field(&self, field: &str, template: &Template) -> eyre::Result<String> {
+        template
+            .render(self)
+            .wrap_err_with(|| format!("in `{field}`"))
+    }
+
+    pub(crate) fn render_path(&self, field: &str, template: &Template) -> eyre::Result<PathBuf> {
+        self.render_field(field, template).map(PathBuf::from)
     }
 
     #[cfg(test)]
@@ -80,6 +114,21 @@ impl<'a> Context<'a> {
         self
     }
 }
+
+/// A variable used where it cannot be resolved.
+#[derive(Debug)]
+pub(crate) struct RenderError {
+    variable: Variable,
+    reason: &'static str,
+}
+
+impl fmt::Display for RenderError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{} is not available: {}", self.variable, self.reason)
+    }
+}
+
+impl std::error::Error for RenderError {}
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub(crate) struct Template(pub(crate) Vec<Segment>);
@@ -166,50 +215,57 @@ impl Template {
             .expect("template parser should be infallible")
     }
 
-    pub(crate) fn render(&self, context: &Context<'_>) -> String {
+    pub(crate) fn render(&self, context: &Context<'_>) -> Result<String, RenderError> {
         let mut out = String::new();
         for segment in &self.0 {
             match segment {
                 Segment::Literal(text) => out.push_str(text),
-                Segment::Var(variable) => out.push_str(&variable.evaluate(context)),
+                Segment::Var(variable) => out.push_str(&variable.evaluate(context)?),
             }
         }
-        out
+        Ok(out)
     }
 }
 
 impl Variable {
-    fn evaluate(&self, context: &Context<'_>) -> String {
+    fn evaluate(&self, context: &Context<'_>) -> Result<String, RenderError> {
         let basename = |path: &Path| {
             path.file_name()
                 .map(|name| name.to_string_lossy().into_owned())
                 .unwrap_or_default()
         };
+        let container_workspace_folder = || {
+            context
+                .container_workspace_folder
+                .ok_or_else(|| self.unavailable(NO_CONTAINER_WORKSPACE_FOLDER))
+        };
         match self {
             Variable::LocalEnv { name, default } => {
-                env_lookup(&context.local_env, name, default.as_deref())
+                Ok(env_lookup(&context.local_env, name, default.as_deref()))
             }
-            Variable::ContainerEnv { name, default } => match &context.container {
-                Some(container) => env_lookup(&container.env, name, default.as_deref()),
-                None => default.clone().unwrap_or_default(),
+            Variable::ContainerEnv { name, default } => match context.container_env {
+                Some(env) => Ok(env_lookup(env, name, default.as_deref())),
+                None => Err(self.unavailable(NO_CONTAINER)),
             },
-            Variable::LocalWorkspaceFolder => context
+            Variable::LocalWorkspaceFolder => Ok(context
                 .local_workspace_folder
                 .to_string_lossy()
-                .into_owned(),
-            Variable::ContainerWorkspaceFolder => context
-                .container_workspace_folder
-                .to_string_lossy()
-                .into_owned(),
-            Variable::LocalWorkspaceFolderBasename => basename(context.local_workspace_folder),
-            Variable::ContainerWorkspaceFolderBasename => {
-                basename(context.container_workspace_folder)
+                .into_owned()),
+            Variable::ContainerWorkspaceFolder => {
+                Ok(container_workspace_folder()?.to_string_lossy().into_owned())
             }
-            Variable::DevcontainerId => context
-                .container
-                .as_ref()
-                .expect("${devcontainerId} requires Context::with_container")
-                .devcontainer_id(),
+            Variable::LocalWorkspaceFolderBasename => Ok(basename(context.local_workspace_folder)),
+            Variable::ContainerWorkspaceFolderBasename => {
+                Ok(basename(container_workspace_folder()?))
+            }
+            Variable::DevcontainerId => Ok(context.labels.devcontainer_id()),
+        }
+    }
+
+    fn unavailable(&self, reason: &'static str) -> RenderError {
+        RenderError {
+            variable: self.clone(),
+            reason,
         }
     }
 }
@@ -322,8 +378,6 @@ fn coalesce_literals(segments: Vec<Segment>) -> Vec<Segment> {
 #[cfg(test)]
 mod tests {
 
-    use docker::LOCAL_FOLDER_LABEL;
-
     use super::*;
 
     fn lit(s: &str) -> Segment {
@@ -343,18 +397,20 @@ mod tests {
 
     struct ContextBuilder {
         local_env: IndexMap<String, String>,
-        local_workspace_folder: std::path::PathBuf,
-        container_workspace_folder: std::path::PathBuf,
-        container: Option<ContainerData>,
+        local_workspace_folder: PathBuf,
+        container_workspace_folder: Option<PathBuf>,
+        container_env: Option<IndexMap<String, String>>,
+        labels: DevcontainerLabels,
     }
 
     impl ContextBuilder {
         fn new() -> Self {
             Self {
                 local_env: IndexMap::new(),
-                local_workspace_folder: std::path::PathBuf::new(),
-                container_workspace_folder: std::path::PathBuf::new(),
-                container: None,
+                local_workspace_folder: PathBuf::new(),
+                container_workspace_folder: None,
+                container_env: None,
+                labels: DevcontainerLabels::new(PathBuf::new(), None),
             }
         }
 
@@ -369,33 +425,45 @@ mod tests {
         }
 
         fn container_workspace_folder(mut self, path: &str) -> Self {
-            self.container_workspace_folder = path.into();
+            self.container_workspace_folder = Some(path.into());
             self
         }
 
-        fn container(mut self, env: &[(&str, &str)], labels: &[(&str, &str)]) -> Self {
-            self.container = Some(ContainerData {
-                env: string_map(env),
-                labels: string_map(labels),
-            });
+        fn container_env(mut self, env: &[(&str, &str)]) -> Self {
+            self.container_env = Some(string_map(env));
+            self
+        }
+
+        fn labels(mut self, local_folder: &str, config_file: Option<&str>) -> Self {
+            self.labels =
+                DevcontainerLabels::new(local_folder.into(), config_file.map(PathBuf::from));
             self
         }
 
         fn build(&self) -> Context<'_> {
-            let mut context = Context::new(
-                &self.local_workspace_folder,
-                &self.container_workspace_folder,
-            )
-            .with_local_env(self.local_env.clone());
-            if let Some(ref container) = self.container {
-                context = context.with_container(container.clone());
+            let mut context = Context::new(&self.local_workspace_folder, &self.labels)
+                .with_local_env(self.local_env.clone());
+            if let Some(folder) = &self.container_workspace_folder {
+                context = context.with_container_workspace_folder(folder);
+            }
+            if let Some(env) = &self.container_env {
+                context = context.with_container_env(env);
             }
             context
         }
     }
 
     fn render_with(input: &str, builder: ContextBuilder) -> String {
-        Template::parse(input).render(&builder.build())
+        Template::parse(input)
+            .render(&builder.build())
+            .expect("variable is available in this context")
+    }
+
+    fn render_error(input: &str, builder: ContextBuilder) -> String {
+        Template::parse(input)
+            .render(&builder.build())
+            .expect_err("variable is not available in this context")
+            .to_string()
     }
 
     #[test]
@@ -589,10 +657,39 @@ mod tests {
         assert_eq!(
             render_with(
                 "${containerEnv:PATH}",
-                ContextBuilder::new().container(&[("PATH", "/usr/bin")], &[]),
+                ContextBuilder::new().container_env(&[("PATH", "/usr/bin")]),
             ),
             "/usr/bin",
         );
+    }
+
+    #[test]
+    fn container_env_without_a_container_is_an_error() {
+        let err = render_error("${containerEnv:PATH}", ContextBuilder::new());
+        assert!(
+            err.contains("${containerEnv:PATH} is not available"),
+            "{err}"
+        );
+        assert!(err.contains("no container exists"), "{err}");
+    }
+
+    /// A default doesn't make the variable answerable — the field it was
+    /// written in is simply the wrong place for it.
+    #[test]
+    fn container_env_default_does_not_mask_an_unavailable_container() {
+        let err = render_error("${containerEnv:PATH:/bin}", ContextBuilder::new());
+        assert!(err.contains("${containerEnv:PATH:/bin}"), "{err}");
+    }
+
+    #[test]
+    fn container_workspace_folder_is_an_error_where_it_is_undefined() {
+        for input in [
+            "${containerWorkspaceFolder}",
+            "${containerWorkspaceFolderBasename}",
+        ] {
+            let err = render_error(input, ContextBuilder::new());
+            assert!(err.contains("cannot refer to itself"), "{err}");
+        }
     }
 
     #[test]
@@ -618,27 +715,25 @@ mod tests {
         );
     }
 
+    /// The id hashes labels we write ourselves, so it resolves with no
+    /// container in sight, and agrees with hashing the labels a container
+    /// would report.
     #[test]
-    fn render_devcontainer_id() {
-        let labels = &[(LOCAL_FOLDER_LABEL, "/foo")];
-        let expected = ContainerData {
-            env: IndexMap::new(),
-            labels: string_map(labels),
-        }
-        .devcontainer_id();
+    fn render_devcontainer_id_without_a_container() {
+        let expected = crate::docker::probe::devcontainer_id(
+            [
+                (docker::LOCAL_FOLDER_LABEL, "/foo"),
+                (docker::CONFIG_FILE_LABEL, "/foo/.devcontainer.json"),
+            ]
+            .into_iter(),
+        );
         assert_eq!(
             render_with(
                 "${devcontainerId}",
-                ContextBuilder::new().container(&[], labels),
+                ContextBuilder::new().labels("/foo", Some("/foo/.devcontainer.json")),
             ),
             expected,
         );
-    }
-
-    #[test]
-    #[should_panic(expected = "${devcontainerId} requires Context::with_container")]
-    fn render_devcontainer_id_panics_without_container() {
-        let _ = render_with("${devcontainerId}", ContextBuilder::new());
     }
 
     #[test]
@@ -688,7 +783,8 @@ mod tests {
                 local_env: self.local_env.clone(),
                 local_workspace_folder: self.local_workspace_folder.clone(),
                 container_workspace_folder: self.container_workspace_folder.clone(),
-                container: self.container.clone(),
+                container_env: self.container_env.clone(),
+                labels: self.labels.clone(),
             }
         }
     }

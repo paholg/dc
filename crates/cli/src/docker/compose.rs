@@ -1,10 +1,9 @@
 use std::path::PathBuf;
 
-use docker::{LOCAL_FOLDER_LABEL, MANAGED_LABEL, PROJECT_LABEL, WORKSPACE_LABEL};
+use docker::{MANAGED_LABEL, PROJECT_LABEL, WORKSPACE_LABEL};
 use eyre::{Context, eyre};
 use serde_json::json;
 
-use crate::devcontainer::substitution;
 use crate::{state::DevcontainerState, workspace::Workspace};
 
 fn override_path(workspace: &Workspace) -> PathBuf {
@@ -36,7 +35,9 @@ pub(crate) fn compose_cmd(
     cmd.args(["compose", "-p"])
         .arg(workspace.compose_project_name());
 
+    let context = devcontainer.context(&workspace.path);
     for f in &devcontainer.config.docker_compose_file {
+        let f = context.render_path("dockerComposeFile", f)?;
         cmd.arg("-f")
             .arg(workspace.path.join(".devcontainer").join(f));
     }
@@ -75,26 +76,35 @@ fn write_compose_override(
     let override_path = override_path(workspace);
 
     let mut labels = vec![
-        format!("{}={}", LOCAL_FOLDER_LABEL, workspace.path.display()),
         format!("{}=true", MANAGED_LABEL),
         format!("{}={}", PROJECT_LABEL, workspace.state.project_name),
         format!("{}={}", WORKSPACE_LABEL, workspace.name),
     ];
-    if let Some(path) = &devcontainer.path {
-        labels.push(format!("devcontainer.config_file={}", path.display()));
-    }
+    // The `devcontainer.*` labels are also what `${devcontainerId}` hashes, so
+    // they come from the same place the substitution context reads them.
+    labels.extend(
+        devcontainer
+            .labels
+            .pairs()
+            .into_iter()
+            .map(|(key, value)| format!("{key}={value}")),
+    );
     let mut service_obj = json!({
         "labels": labels
     });
 
-    let context =
-        substitution::Context::new(&workspace.path, &devcontainer.config.workspace_folder);
+    let context = devcontainer.context(&workspace.path);
     let env: indexmap::IndexMap<String, String> = devcontainer
         .config
         .container_env
         .iter()
-        .map(|(k, v)| (k.clone(), v.render(&context)))
-        .collect();
+        .map(|(k, v)| {
+            Ok((
+                k.clone(),
+                context.render_field(&format!("containerEnv.{k}"), v)?,
+            ))
+        })
+        .collect::<eyre::Result<_>>()?;
     if !env.is_empty() {
         service_obj["environment"] = json!(env);
     }
@@ -111,8 +121,8 @@ fn write_compose_override(
     if !devcontainer.config.security_opt.is_empty() {
         service_obj["security_opt"] = json!(devcontainer.config.security_opt);
     }
-    if let Some(ref user) = devcontainer.config.container_user {
-        service_obj["user"] = json!(user);
+    if let Some(user) = &devcontainer.config.container_user {
+        service_obj["user"] = json!(context.render_field("containerUser", user)?);
     }
 
     let devconcurrent_options = devcontainer.devconcurrent();

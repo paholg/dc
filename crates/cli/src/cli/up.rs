@@ -10,7 +10,6 @@ use crate::cli::fwd::forward;
 use crate::cli::{State, go, proxy};
 use crate::complete::complete_workspace;
 use crate::config::Config;
-use crate::devcontainer::substitution;
 use crate::docker::compose::{compose_cmd, compose_ps_q};
 use crate::docker::probe;
 use crate::run::Runner;
@@ -85,9 +84,12 @@ impl Up {
         let devcontainer = state.devcontainer_for(&workspace.path)?;
         let devcontainer = &devcontainer;
 
-        // initializeCommand runs on the host, from the worktree
-        if let Some(ref cmd) = devcontainer.config.initialize_command {
-            cmd.run_on_host("initializeCommand", Some(&workspace.path))
+        // initializeCommand runs on the host, from the worktree, before any
+        // container exists — so `${containerEnv:…}` is an error here.
+        if let Some(cmd) = &devcontainer.config.initialize_command {
+            let context = devcontainer.context(&workspace.path);
+            cmd.render("initializeCommand", &context)?
+                .run_on_host("initializeCommand", Some(&workspace.path))
                 .await?;
         }
 
@@ -120,11 +122,20 @@ impl Up {
         Runner::run(cmd).await?;
 
         let container_id = compose_ps_q(devcontainer, &workspace).await?;
-        let user = devcontainer.config.remote_user.as_deref();
-        let workdir = Some(devcontainer.config.workspace_folder.as_path());
+        let workdir = Some(devcontainer.workspace_folder.as_path());
 
         let container =
             probe::ContainerData::inspect(&devcontainer.docker.client, &container_id).await?;
+        let context = devcontainer
+            .context(&workspace.path)
+            .with_container_env(&container.env);
+        let user = devcontainer
+            .config
+            .remote_user
+            .as_ref()
+            .map(|user| context.render_field("remoteUser", user))
+            .transpose()?;
+        let user = user.as_deref();
         let probed = probe::user_env(
             &container_id,
             user,
@@ -132,46 +143,36 @@ impl Up {
             devcontainer.config.user_env_probe,
         )
         .await?;
-        let context =
-            substitution::Context::new(&workspace.path, &devcontainer.config.workspace_folder)
-                .with_container(container);
         // Spec merge order: probed env is the base; devcontainer.json `remoteEnv` overlays.
         // A `None` (spec `null`) emits `-e KEY=` (empty) downstream.
         let mut merged: IndexMap<String, Option<String>> =
             probed.into_iter().map(|(k, v)| (k, Some(v))).collect();
         for (key, template) in &devcontainer.config.remote_env {
-            merged.insert(key.clone(), template.as_ref().map(|t| t.render(&context)));
+            let value = template
+                .as_ref()
+                .map(|t| context.render_field(&format!("remoteEnv.{key}"), t))
+                .transpose()?;
+            merged.insert(key.clone(), value);
         }
         let remote_env = &merged;
 
         // Lifecycle commands: create-only commands run only on first creation
         // For now, though, we always recreate.
-        if let Some(ref cmd) = devcontainer.config.on_create_command {
-            cmd.run_in_container("onCreateCommand", &container_id, user, workdir, remote_env)
-                .await?;
-        }
-        if let Some(ref cmd) = devcontainer.config.update_content_command {
-            cmd.run_in_container(
+        for (name, cmd) in [
+            ("onCreateCommand", &devcontainer.config.on_create_command),
+            (
                 "updateContentCommand",
-                &container_id,
-                user,
-                workdir,
-                remote_env,
-            )
-            .await?;
-        }
-        if let Some(ref cmd) = devcontainer.config.post_create_command {
-            cmd.run_in_container(
+                &devcontainer.config.update_content_command,
+            ),
+            (
                 "postCreateCommand",
-                &container_id,
-                user,
-                workdir,
-                remote_env,
-            )
-            .await?;
-        }
-        if let Some(ref cmd) = devcontainer.config.post_start_command {
-            cmd.run_in_container("postStartCommand", &container_id, user, workdir, remote_env)
+                &devcontainer.config.post_create_command,
+            ),
+            ("postStartCommand", &devcontainer.config.post_start_command),
+        ] {
+            let Some(cmd) = cmd else { continue };
+            cmd.render(name, &context)?
+                .run_in_container(name, &container_id, user, workdir, remote_env)
                 .await?;
         }
 
@@ -182,7 +183,20 @@ impl Up {
 
         // Interactive exec if requested
         if let Some(cmd_args) = self.exec {
-            exec_interactive(&container_id, devcontainer, remote_env, &cmd_args)?;
+            let default_exec = devcontainer
+                .devconcurrent()
+                .default_exec
+                .as_ref()
+                .map(|cmd| cmd.render("defaultExec", &context))
+                .transpose()?;
+            exec_interactive(
+                &container_id,
+                devcontainer,
+                remote_env,
+                &cmd_args,
+                user,
+                default_exec.as_ref(),
+            )?;
         }
 
         if self.go {

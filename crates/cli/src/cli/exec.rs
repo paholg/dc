@@ -10,8 +10,8 @@ use indexmap::IndexMap;
 use crate::cli::State;
 use crate::complete::complete_workspace;
 use crate::config::Config;
-use crate::devcontainer::substitution;
 use crate::docker::probe;
+use crate::run::cmd::Cmd;
 use crate::state::DevcontainerState;
 
 /// Exec into a running devcontainer
@@ -43,31 +43,60 @@ impl Exec {
         let container_id = workspace_full.service_container_id()?;
         let container =
             probe::ContainerData::inspect(&devcontainer.docker.client, container_id).await?;
+        let context = devcontainer
+            .context(&workspace.path)
+            .with_container_env(&container.env);
+        let user = devcontainer
+            .config
+            .remote_user
+            .as_ref()
+            .map(|user| context.render_field("remoteUser", user))
+            .transpose()?;
         let probed = probe::user_env(
             container_id,
-            devcontainer.config.remote_user.as_deref(),
+            user.as_deref(),
             &container.env,
             devcontainer.config.user_env_probe,
         )
         .await?;
-        let context =
-            substitution::Context::new(&workspace.path, &devcontainer.config.workspace_folder)
-                .with_container(container);
         let mut remote_env: IndexMap<String, Option<String>> =
             probed.into_iter().map(|(k, v)| (k, Some(v))).collect();
         for (key, template) in &devcontainer.config.remote_env {
-            remote_env.insert(key.clone(), template.as_ref().map(|t| t.render(&context)));
+            let value = template
+                .as_ref()
+                .map(|t| context.render_field(&format!("remoteEnv.{key}"), t))
+                .transpose()?;
+            remote_env.insert(key.clone(), value);
         }
 
-        exec_interactive(container_id, devcontainer, &remote_env, &self.cmd)
+        let default_exec = devcontainer
+            .devconcurrent()
+            .default_exec
+            .as_ref()
+            .map(|cmd| cmd.render("defaultExec", &context))
+            .transpose()?;
+
+        exec_interactive(
+            container_id,
+            devcontainer,
+            &remote_env,
+            &self.cmd,
+            user.as_deref(),
+            default_exec.as_ref(),
+        )
     }
 }
 
+/// `user` and `default_exec` are the rendered `remoteUser` and
+/// `customizations.devconcurrent.defaultExec`; the latter is used when no
+/// command is given on the CLI.
 pub(crate) fn exec_interactive(
     container_id: &str,
     devcontainer: &DevcontainerState,
     remote_env: &IndexMap<String, Option<String>>,
     cmd_args: &[String],
+    user: Option<&str>,
+    default_exec: Option<&Cmd>,
 ) -> eyre::Result<()> {
     let mut cmd = std::process::Command::new("docker");
     cmd.arg("exec");
@@ -75,12 +104,10 @@ pub(crate) fn exec_interactive(
         cmd.arg("-it");
     }
 
-    let dc_options = devcontainer.devconcurrent();
-
-    if let Some(u) = devcontainer.config.remote_user.as_deref() {
+    if let Some(u) = user {
         cmd.args(["-u", u]);
     }
-    cmd.arg("-w").arg(&devcontainer.config.workspace_folder);
+    cmd.arg("-w").arg(&devcontainer.workspace_folder);
 
     for (k, v) in remote_env {
         // null in remoteEnv means "unset" per spec; we can't truly unset PID-1-inherited vars via
@@ -94,9 +121,7 @@ pub(crate) fn exec_interactive(
 
     if cmd_args.is_empty() {
         cmd.args(
-            dc_options
-                .default_exec
-                .as_ref()
+            default_exec
                 .ok_or_else(|| eyre!("no command provided and no default configured"))?
                 .as_args(),
         );

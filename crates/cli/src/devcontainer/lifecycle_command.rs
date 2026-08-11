@@ -4,12 +4,45 @@ use indexmap::IndexMap;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use crate::devcontainer::substitution::Context;
 use crate::run::Runner;
-use crate::run::cmd::{Cmd, NamedCmd};
+use crate::run::cmd::{Cmd, CmdTemplate, NamedCmd};
 use crate::run::docker_exec::DockerExec;
 
+/// A lifecycle command as written in config, before `${...}` substitution.
 #[derive(Deserialize, Serialize, Clone, Debug, JsonSchema)]
 #[serde(untagged)]
+pub(crate) enum LifecycleCommandTemplate {
+    Single(CmdTemplate),
+    Parallel(IndexMap<String, CmdTemplate>),
+}
+
+impl LifecycleCommandTemplate {
+    /// `field` is the property name, e.g. `postCreateCommand`.
+    pub(crate) fn render(
+        &self,
+        field: &str,
+        context: &Context<'_>,
+    ) -> eyre::Result<LifecycleCommand> {
+        match self {
+            LifecycleCommandTemplate::Single(cmd) => {
+                Ok(LifecycleCommand::Single(cmd.render(field, context)?))
+            }
+            LifecycleCommandTemplate::Parallel(map) => Ok(LifecycleCommand::Parallel(
+                map.iter()
+                    .map(|(name, cmd)| {
+                        Ok((
+                            name.clone(),
+                            cmd.render(&format!("{field}.{name}"), context)?,
+                        ))
+                    })
+                    .collect::<eyre::Result<_>>()?,
+            )),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
 pub(crate) enum LifecycleCommand {
     Single(Cmd),
     Parallel(IndexMap<String, Cmd>),

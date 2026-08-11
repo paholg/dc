@@ -39,6 +39,7 @@ pub use types::ApiVersion;
 pub use volumes::Volume;
 
 pub const LOCAL_FOLDER_LABEL: &str = "devcontainer.local_folder";
+pub const CONFIG_FILE_LABEL: &str = "devcontainer.config_file";
 
 pub const COMPOSE_PROJECT_LABEL: &str = "com.docker.compose.project";
 pub const COMPOSE_SERVICE_LABEL: &str = "com.docker.compose.service";

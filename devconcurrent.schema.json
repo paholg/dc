@@ -56,7 +56,7 @@
       "properties": {
         "dockerComposeFile": {
           "description": "The name of the docker-compose file(s) used to start the services.",
-          "$ref": "#/$defs/OneOrMany(string,PreferOne)",
+          "$ref": "#/$defs/OneOrMany(Template,PreferOne)",
           "default": []
         },
         "service": {
@@ -77,7 +77,7 @@
         },
         "workspaceFolder": {
           "description": "The path of the workspace folder inside the container. This is typically the target path of\na volume mount in the docker-compose.yml.",
-          "type": "string",
+          "$ref": "#/$defs/Template",
           "default": ""
         },
         "shutdownAction": {
@@ -100,9 +100,13 @@
         },
         "name": {
           "description": "A name for the dev container which can be displayed to the user.",
-          "type": [
-            "string",
-            "null"
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Template"
+            },
+            {
+              "type": "null"
+            }
           ],
           "default": null
         },
@@ -165,9 +169,13 @@
         },
         "containerUser": {
           "description": "The user the container will be started with. The default is the user on the Docker image.",
-          "type": [
-            "string",
-            "null"
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Template"
+            },
+            {
+              "type": "null"
+            }
           ],
           "default": null
         },
@@ -227,9 +235,13 @@
         },
         "remoteUser": {
           "description": "The username to use for spawning processes in the container including\nlifecycle scripts and any remote editor/IDE server process. The default\nis the same user as the container.",
-          "type": [
-            "string",
-            "null"
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Template"
+            },
+            {
+              "type": "null"
+            }
           ],
           "default": null
         },
@@ -237,7 +249,7 @@
           "description": "A command to run locally (i.e Your host machine, cloud VM) before anything else. This\ncommand is run before \"onCreateCommand\".",
           "anyOf": [
             {
-              "$ref": "#/$defs/LifecycleCommand"
+              "$ref": "#/$defs/LifecycleCommandTemplate"
             },
             {
               "type": "null"
@@ -249,7 +261,7 @@
           "description": "A command to run when creating the container. This command is run after \"initializeCommand\"\nand before \"updateContentCommand\".",
           "anyOf": [
             {
-              "$ref": "#/$defs/LifecycleCommand"
+              "$ref": "#/$defs/LifecycleCommandTemplate"
             },
             {
               "type": "null"
@@ -261,7 +273,7 @@
           "description": "A command to run when creating the container and rerun when the workspace content was\nupdated while creating the container. This command is run after \"onCreateCommand\" and before\n\"postCreateCommand\".",
           "anyOf": [
             {
-              "$ref": "#/$defs/LifecycleCommand"
+              "$ref": "#/$defs/LifecycleCommandTemplate"
             },
             {
               "type": "null"
@@ -273,7 +285,7 @@
           "description": "A command to run after creating the container. This command is run after\n\"updateContentCommand\" and before \"postStartCommand\".",
           "anyOf": [
             {
-              "$ref": "#/$defs/LifecycleCommand"
+              "$ref": "#/$defs/LifecycleCommandTemplate"
             },
             {
               "type": "null"
@@ -285,7 +297,7 @@
           "description": "A command to run after starting the container. This command is run after \"postCreateCommand\"\nand before \"postAttachCommand\".",
           "anyOf": [
             {
-              "$ref": "#/$defs/LifecycleCommand"
+              "$ref": "#/$defs/LifecycleCommandTemplate"
             },
             {
               "type": "null"
@@ -297,7 +309,7 @@
           "description": "A command to run when attaching to the container. This command is run after\n\"postStartCommand\".",
           "anyOf": [
             {
-              "$ref": "#/$defs/LifecycleCommand"
+              "$ref": "#/$defs/LifecycleCommandTemplate"
             },
             {
               "type": "null"
@@ -345,18 +357,22 @@
         }
       }
     },
-    "OneOrMany(string,PreferOne)": {
+    "OneOrMany(Template,PreferOne)": {
       "anyOf": [
         {
-          "type": "string"
+          "$ref": "#/$defs/Template"
         },
         {
           "type": "array",
           "items": {
-            "type": "string"
+            "$ref": "#/$defs/Template"
           }
         }
       ]
+    },
+    "Template": {
+      "description": "A string that may contain `${...}` variable substitutions. Supported variables: `${localEnv:VAR[:default]}`, `${containerEnv:VAR[:default]}`, `${localWorkspaceFolder}`, `${containerWorkspaceFolder}`, `${localWorkspaceFolderBasename}`, `${containerWorkspaceFolderBasename}`, `${devcontainerId}`. See https://containers.dev/implementors/json_reference/#variables-in-devcontainerjson.",
+      "type": "string"
     },
     "ComposeShutdownAction": {
       "type": "string",
@@ -423,10 +439,6 @@
         "https"
       ]
     },
-    "Template": {
-      "description": "A string that may contain `${...}` variable substitutions. Supported variables: `${localEnv:VAR[:default]}`, `${containerEnv:VAR[:default]}`, `${localWorkspaceFolder}`, `${containerWorkspaceFolder}`, `${localWorkspaceFolderBasename}`, `${containerWorkspaceFolderBasename}`, `${devcontainerId}`. See https://containers.dev/implementors/json_reference/#variables-in-devcontainerjson.",
-      "type": "string"
-    },
     "MountEntry": {
       "anyOf": [
         {
@@ -471,28 +483,30 @@
         "volume"
       ]
     },
-    "LifecycleCommand": {
+    "LifecycleCommandTemplate": {
+      "description": "A lifecycle command as written in config, before `${...}` substitution.",
       "anyOf": [
         {
-          "$ref": "#/$defs/Cmd"
+          "$ref": "#/$defs/CmdTemplate"
         },
         {
           "type": "object",
           "additionalProperties": {
-            "$ref": "#/$defs/Cmd"
+            "$ref": "#/$defs/CmdTemplate"
           }
         }
       ]
     },
-    "Cmd": {
+    "CmdTemplate": {
+      "description": "A command as written in config, before `${...}` substitution.",
       "anyOf": [
         {
-          "type": "string"
+          "$ref": "#/$defs/Template"
         },
         {
           "type": "array",
           "items": {
-            "type": "string"
+            "$ref": "#/$defs/Template"
           }
         }
       ]
@@ -609,7 +623,7 @@
         "defaultExec": {
           "anyOf": [
             {
-              "$ref": "#/$defs/Cmd"
+              "$ref": "#/$defs/CmdTemplate"
             },
             {
               "type": "null"

@@ -36,6 +36,37 @@ Here are the options:
     These will be merged with the project's `devcontainer.json` file, with
     arrays being merged, and settings from this file otherwise taking precedence.
 
+## Variables in devcontainer.json
+
+devconcurrent substitutes the [devcontainer
+variables](https://containers.dev/implementors/json_reference/#variables-in-devcontainerjson)
+in these properties:
+
+* `dockerComposeFile`
+* `workspaceFolder`
+* `name`
+* `containerEnv`, `remoteEnv`
+* `containerUser`, `remoteUser`
+* `mounts`
+* `initializeCommand`, `onCreateCommand`, `updateContentCommand`,
+  `postCreateCommand`, `postStartCommand`, `postAttachCommand`
+* `customizations.devconcurrent.defaultExec`
+
+Available everywhere: `${localEnv:VAR[:default]}`, `${localWorkspaceFolder}`,
+`${localWorkspaceFolderBasename}`, `${devcontainerId}`.
+
+`${containerWorkspaceFolder}` and `${containerWorkspaceFolderBasename}` are
+available everywhere except in `workspaceFolder`, which is what defines them.
+
+`${containerEnv:VAR[:default]}` needs a container to read from, so it is only
+available in fields applied after the container exists: `remoteEnv`, `remoteUser`,
+`defaultExec`, and the lifecycle commands that run in the container. Using it
+anywhere else — `containerEnv` or `initializeCommand`, say — is an error naming
+the field, rather than a silently empty value.
+
+Anything else in `${...}` is left alone, so shell syntax like `${HOME}` survives
+in a lifecycle command.
+
 ## Devcontainer customization
 
 In `devcontainer.json`, or `projects.FOO.devcontainer`, you can specify further

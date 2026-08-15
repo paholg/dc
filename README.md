@@ -386,6 +386,25 @@ available:
 The default is `{{workspace}}.{{service}}.test`. If you wanted a different TLD
 than `.test`, this is where you would set it.
 
+A single service can override this via
+`customizations.devconcurrent.proxy.services.<service>.hostname`, which takes the
+same template. For example, to drop the service name from your main service's
+hostname while leaving the rest alone:
+
+```json
+{
+  "customizations": {
+    "devconcurrent": {
+      "proxy": {
+        "services": {
+          "app": { "hostname": "{{workspace}}.test" }
+        }
+      }
+    }
+  }
+}
+```
+
 ### Proxy and HTTPS
 
 We've gotten pretty far, but there's one looming dark cloud: security. Now that

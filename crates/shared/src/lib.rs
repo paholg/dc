@@ -49,7 +49,8 @@ pub struct ProxyOptions {
     /// Opt in to proxy routing for this project.
     pub enable: bool,
 
-    /// Handlebars template for the proxied hostname.
+    /// Handlebars template for the proxied hostname, used by every service
+    /// that does not set its own.
     ///
     /// Available variables:
     /// - `root` (bool) — whether this is the root workspace
@@ -66,8 +67,9 @@ pub struct ProxyOptions {
 
 impl ProxyOptions {
     /// Render the hostname for one `(project, workspace, service)` tuple using
-    /// this project's `hostname` template (falling back to the default when
-    /// unset). Returns `None` if the template fails to render.
+    /// the service's `hostname` template, falling back to the project-level
+    /// one and then to the default. Returns `None` if the template fails to
+    /// render.
     #[must_use]
     pub fn render_hostname(
         &self,
@@ -84,8 +86,10 @@ impl ProxyOptions {
             service: &'a str,
         }
         let source = self
-            .hostname
-            .as_ref()
+            .services
+            .get(service)
+            .and_then(|s| s.hostname.as_ref())
+            .or(self.hostname.as_ref())
             .map_or(DEFAULT_HOSTNAME_TEMPLATE, Template::source);
 
         let mut hbs = handlebars::Handlebars::new();
@@ -104,6 +108,10 @@ impl ProxyOptions {
 #[derive(Deserialize, Serialize, Clone, Debug, Default, JsonSchema)]
 #[serde(rename_all = "camelCase", default)]
 pub struct ProxyService {
+    /// Handlebars template for this service's hostname. Overrides the
+    /// project-level `hostname`; same variables are available.
+    pub hostname: Option<Template>,
+
     pub ports: Vec<ProxyPort>,
 }
 
@@ -240,6 +248,45 @@ pub struct SidecarPlan {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn template(source: &str) -> Template {
+        Template::compile(source.to_string()).expect("valid template")
+    }
+
+    #[test]
+    fn service_hostname_overrides_the_project_one() {
+        let opts = ProxyOptions {
+            hostname: Some(template("{{workspace}}.{{service}}.test")),
+            services: [(
+                "app".to_string(),
+                ProxyService {
+                    hostname: Some(template("{{workspace}}.test")),
+                    ..ProxyService::default()
+                },
+            )]
+            .into_iter()
+            .collect(),
+            ..ProxyOptions::default()
+        };
+        assert_eq!(
+            opts.render_hostname("proj", "feature", "app", false)
+                .unwrap(),
+            "feature.test"
+        );
+        assert_eq!(
+            opts.render_hostname("proj", "feature", "db", false).unwrap(),
+            "feature.db.test"
+        );
+    }
+
+    #[test]
+    fn falls_back_to_the_default_template() {
+        let opts = ProxyOptions::default();
+        assert_eq!(
+            opts.render_hostname("proj", "feature", "db", false).unwrap(),
+            "feature.db.test"
+        );
+    }
 
     #[test]
     fn rejects_tls_with_same_port() {

@@ -667,7 +667,7 @@
           "default": false
         },
         "hostname": {
-          "description": "Handlebars template for the proxied hostname.\n\nAvailable variables:\n- `root` (bool) — whether this is the root workspace\n- `project` — project name\n- `workspace` — workspace name\n- `service` — name of the service from compose\n\nDefault: {{workspace}}.{{service}}.test",
+          "description": "Handlebars template for the proxied hostname, used by every service\nthat does not set its own.\n\nAvailable variables:\n- `root` (bool) — whether this is the root workspace\n- `project` — project name\n- `workspace` — workspace name\n- `service` — name of the service from compose\n\nDefault: {{workspace}}.{{service}}.test",
           "anyOf": [
             {
               "$ref": "#/$defs/ProxyHostnameTemplate"
@@ -695,6 +695,18 @@
     "ProxyService": {
       "type": "object",
       "properties": {
+        "hostname": {
+          "description": "Handlebars template for this service's hostname. Overrides the\nproject-level `hostname`; same variables are available.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ProxyHostnameTemplate"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "ports": {
           "type": "array",
           "items": {

@@ -543,10 +543,17 @@
       ]
     },
     "MountType": {
-      "type": "string",
-      "enum": [
-        "bind",
-        "volume"
+      "oneOf": [
+        {
+          "description": "A bind mount from the host filesystem.",
+          "type": "string",
+          "const": "bind"
+        },
+        {
+          "description": "A named Docker volume.",
+          "type": "string",
+          "const": "volume"
+        }
       ]
     },
     "LifecycleCommandTemplate": {
@@ -588,12 +595,27 @@
       ]
     },
     "UserEnvProbe": {
-      "type": "string",
-      "enum": [
-        "none",
-        "loginShell",
-        "loginInteractiveShell",
-        "interactiveShell"
+      "oneOf": [
+        {
+          "description": "Do not probe the user's shell for environment variables.",
+          "type": "string",
+          "const": "none"
+        },
+        {
+          "description": "Probe with a login shell (`-lc`).",
+          "type": "string",
+          "const": "loginShell"
+        },
+        {
+          "description": "Probe with a login, interactive shell (`-lic`).",
+          "type": "string",
+          "const": "loginInteractiveShell"
+        },
+        {
+          "description": "Probe with an interactive shell (`-ic`).",
+          "type": "string",
+          "const": "interactiveShell"
+        }
       ]
     },
     "HostRequirements": {

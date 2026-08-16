@@ -284,7 +284,9 @@ pub(crate) struct Mount {
 #[derive(Deserialize, Serialize, Clone, Copy, Debug, PartialEq, Eq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub(crate) enum MountType {
+    /// A bind mount from the host filesystem.
     Bind,
+    /// A named Docker volume.
     Volume,
 }
 
@@ -452,10 +454,14 @@ pub(crate) enum OnAutoForward {
 #[derive(Deserialize, Serialize, Clone, Copy, Debug, PartialEq, Eq, Default, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub(crate) enum UserEnvProbe {
+    /// Do not probe the user's shell for environment variables.
     None,
+    /// Probe with a login shell (`-lc`).
     LoginShell,
+    /// Probe with a login, interactive shell (`-lic`).
     #[default]
     LoginInteractiveShell,
+    /// Probe with an interactive shell (`-ic`).
     InteractiveShell,
 }
 

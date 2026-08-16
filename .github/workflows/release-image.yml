@@ -1,0 +1,101 @@
+# Called by dist's release.yml as a `global-artifacts-jobs` hook, so the image
+# is published before the GitHub Release exists. A failure here means no
+# release, no installers, and no homebrew formula for that version.
+name: Release image
+
+on:
+  workflow_call:
+    inputs:
+      plan:
+        required: true
+        type: string
+
+env:
+  IMAGE: ghcr.io/${{ github.repository_owner }}/devconcurrent-proxy
+
+jobs:
+  image:
+    name: Image (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runs-on: ubuntu-latest
+            arch: amd64
+          - runs-on: ubuntu-24.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.runs-on }}
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: nixbuild/nix-quick-install-action@v32
+      - uses: nix-community/cache-nix-action@v6
+        with:
+          primary-key: nix-${{ runner.os }}-${{ matrix.arch }}-${{ hashFiles('flake.lock', '**/Cargo.lock') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-${{ matrix.arch }}-
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Determine version
+        id: version
+        env:
+          TAG: ${{ fromJson(inputs.plan).announcement_tag }}
+        run: echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Build & push per-arch image
+        run: |
+          # GitHub's runner image hardcodes a v1 /etc/containers/registries.conf,
+          # which the newer nix-provided skopeo refuses to load. Point it at a v2 file.
+          mkdir -p "$RUNNER_TEMP/containers"
+          printf 'unqualified-search-registries = ["docker.io"]\n' \
+            > "$RUNNER_TEMP/containers/registries.conf"
+          export CONTAINERS_REGISTRIES_CONF="$RUNNER_TEMP/containers/registries.conf"
+          nix run .#docker-service-image.copyTo -- \
+            "docker://${IMAGE}:${{ steps.version.outputs.version }}-${{ matrix.arch }}"
+
+  image-manifest:
+    name: Multi-arch manifest
+    needs: image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha
+
+      - name: Create manifests
+        env:
+          TAGS: ${{ steps.meta.outputs.tags }}
+          VERSION: ${{ needs.image.outputs.version }}
+        run: |
+          while IFS= read -r tag; do
+            [ -z "$tag" ] && continue
+            docker buildx imagetools create \
+              -t "$tag" \
+              "${IMAGE}:${VERSION}-amd64" \
+              "${IMAGE}:${VERSION}-arm64"
+          done <<< "$TAGS"

@@ -148,3 +148,14 @@ pub fn schema() -> schemars::Schema {
 pub fn cli_command() -> clap::Command {
     Cli::command()
 }
+
+#[cfg(test)]
+mod test {
+    #[test]
+    fn schema_is_valid_json_schema() {
+        let schema = serde_json::to_value(super::schema()).expect("schema serializes");
+        if let Err(error) = jsonschema::meta::validate(&schema) {
+            panic!("invalid JSON Schema at {}: {error}", error.instance_path());
+        }
+    }
+}

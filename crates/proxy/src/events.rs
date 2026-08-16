@@ -196,11 +196,11 @@ async fn adopt(
         workspace,
         service,
         %container_ip,
-        has_port_remap = port_config.is_some_and(|s| !s.ports.is_empty()),
+        container_port = port_config.and_then(|s| s.container_port),
         "adopting service"
     );
 
-    let sidecar_id = if let Some(svc) = port_config.filter(|s| !s.ports.is_empty()) {
+    let sidecar_id = if let Some(svc) = port_config.filter(|s| s.container_port.is_some()) {
         let root = workspace == project;
         let hostname = opts
             .render_hostname(project, workspace, service, root)

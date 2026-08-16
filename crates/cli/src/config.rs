@@ -89,9 +89,9 @@ pub(crate) struct ProxyGlobal {
     ///
     /// Default: 43770
     pub(crate) port: u16,
-    /// Path to mkcert's CAROOT directory on the host. Required for `tls: true`
-    /// port mappings; leave unset to disable TLS termination. Find it with
-    /// `mkcert -CAROOT`.
+    /// Path to mkcert's CAROOT directory on the host. Required to serve
+    /// services over https; leave unset to serve them over http only. Find it
+    /// with `mkcert -CAROOT`.
     #[serde(default, deserialize_with = "deserialize_shell_path_opt")]
     pub(crate) ca_root: Option<PathBuf>,
 }

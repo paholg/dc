@@ -1,16 +1,16 @@
 //! Lifecycle of the per-service sidecar.
 //!
-//! One sidecar per `(workspace, service)` that has port remappings, joined to
-//! that service's container network namespace. The sidecar runs our own
-//! `devconcurrent-proxy` image with the `sidecar` subcommand; it reads its
+//! One sidecar per `(workspace, service)` that declares a `containerPort`,
+//! joined to that service's container network namespace. The sidecar runs our
+//! own `devconcurrent-proxy` image with the `sidecar` subcommand; it reads its
 //! plan from `/etc/sidecar/plan.json` (written here via the docker archive
-//! upload API) and binds each `host` port in the target's netns, forwarding
-//! to `127.0.0.1:<container>`. TLS-marked ports get a leaf cert minted from
-//! the proxy's CA and uploaded alongside the plan.
+//! upload API) and binds ports 80 and 443 in the target's netns, both
+//! forwarding to `127.0.0.1:<containerPort>`. The leaf cert 443 terminates
+//! with is minted from the proxy's CA and uploaded alongside the plan.
 //!
-//! Clients reach the service by connecting to that container's IP at
-//! `<host>` — on Linux directly via the docker bridge, on macOS via a tunnel
-//! such as docker-mac-net-connect.
+//! Clients reach the service by connecting to that container's IP — on Linux
+//! directly via the docker bridge, on macOS via a tunnel such as
+//! docker-mac-net-connect.
 
 use docker::{
     Docker, PROJECT_LABEL, PROXY_CONFIG_HASH_LABEL, PROXY_GROUP_LABEL, PROXY_SERVICE_LABEL,
@@ -34,7 +34,7 @@ fn sidecar_image() -> String {
 }
 
 /// Create the sidecar joined to `target_cid`'s netns and start it. Returns
-/// the sidecar's container ID, or `None` if `svc` has no port mappings.
+/// the sidecar's container ID, or `None` if `svc` declares no container port.
 ///
 /// `hostname` is the rendered template result, used only as the SAN of any
 /// minted TLS leaf cert.
@@ -49,18 +49,28 @@ pub async fn create_sidecar(
     hostname: &str,
     target_cid: &str,
 ) -> Result<Option<String>> {
-    // A plain port where host == container is a no-op: DNS already resolves
-    // the hostname to the container's IP, and the app binds the port itself.
-    // Binding it again in the sidecar would just race the app for `0.0.0.0:port`.
-    let ports: Vec<_> = svc
-        .ports
-        .iter()
-        .copied()
-        .filter(|p| p.tls || p.host != p.container)
-        .collect();
-    if ports.is_empty() {
+    let Some(port) = svc.container_port else {
         return Ok(None);
-    }
+    };
+    let plan = SidecarPlan {
+        hostname: hostname.to_string(),
+        port,
+    };
+
+    // Without a cert the sidecar still serves http; only the https listener
+    // goes missing.
+    let tls_pair: Option<(Vec<u8>, Vec<u8>)> = if let Some(ca) = ca {
+        match ca.mint(hostname) {
+            Ok((cert_pem, key_pem)) => Some((cert_pem.into_bytes(), key_pem.into_bytes())),
+            Err(e) => {
+                tracing::warn!(hostname, "mint cert failed; serving http only: {e:?}");
+                None
+            }
+        }
+    } else {
+        tracing::warn!(hostname, "proxy has no CA; serving http only");
+        None
+    };
 
     let image = sidecar_image();
     docker
@@ -73,35 +83,7 @@ pub async fn create_sidecar(
     ));
     let network_mode = format!("container:{target_cid}");
 
-    // Build the plan JSON and (optionally) mint a cert.
-    let plan = SidecarPlan {
-        hostname: hostname.to_string(),
-        ports,
-    };
     let plan_json = serde_json::to_vec_pretty(&plan).wrap_err("serialize sidecar plan")?;
-
-    let tls_pair: Option<(Vec<u8>, Vec<u8>)> = if plan.ports.iter().any(|p| p.tls) {
-        if let Some(ca) = ca {
-            match ca.mint(hostname) {
-                Ok((cert_pem, key_pem)) => Some((cert_pem.into_bytes(), key_pem.into_bytes())),
-                Err(e) => {
-                    tracing::warn!(
-                        hostname,
-                        "mint cert failed; TLS ports will be disabled: {e:?}"
-                    );
-                    None
-                }
-            }
-        } else {
-            tracing::warn!(
-                hostname,
-                "TLS ports declared but proxy has no CA; TLS ports will be disabled"
-            );
-            None
-        }
-    } else {
-        None
-    };
 
     // If a stale sidecar exists from a previous run, force-remove it first.
     match docker.remove_container(&name).force(true).call().await {

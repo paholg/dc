@@ -1,15 +1,15 @@
 //! Sidecar mode of the proxy binary. The same image runs in this mode when
 //! invoked with the `sidecar` subcommand; the proxy creates these sidecars
-//! inside the netns of each compose service that needs port remapping (or
-//! TLS termination).
+//! inside the netns of each compose service that declares a `containerPort`.
 //!
 //! The plan + optional cert/key are written into `/etc/sidecar/` by the
 //! proxy before the container starts. We read them once on boot and spawn
-//! one tokio task per listener.
+//! one tokio task per listener: 80 always, and 443 when we have a cert. Both
+//! forward to the plan's container port.
 //!
-//! Plain TCP ports use a raw byte-splice forwarder. TLS ports run a hyper
-//! HTTP/1.1 server on the decrypted stream and route into `axum-reverse-proxy`
-//! for the upstream side. A small tower layer adds the `X-Forwarded-Proto`
+//! Port 80 uses a raw byte-splice forwarder. Port 443 runs a hyper HTTP/1.1
+//! server on the decrypted stream and routes into `axum-reverse-proxy` for the
+//! upstream side. A small tower layer adds the `X-Forwarded-Proto`
 //! and `X-Forwarded-Host` headers Rails needs to reconstruct `https://…`
 //! URLs. `X-Forwarded-For` is deliberately not added — the apparent client
 //! inside the netns is the docker bridge gateway, and forwarding that to
@@ -30,7 +30,8 @@ use hyper_util::service::TowerToHyperService;
 use rustls::ServerConfig;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, pem::PemObject};
 use shared::{
-    SIDECAR_CERT_FILE, SIDECAR_KEY_FILE, SIDECAR_PLAN_DIR, SIDECAR_PLAN_FILE, SidecarPlan,
+    HTTP_PORT, HTTPS_PORT, SIDECAR_CERT_FILE, SIDECAR_KEY_FILE, SIDECAR_PLAN_DIR,
+    SIDECAR_PLAN_FILE, SidecarPlan,
 };
 use tokio::io::{AsyncWriteExt, copy_bidirectional};
 use tokio::net::{TcpListener, TcpStream};
@@ -47,31 +48,18 @@ pub async fn run() -> Result<()> {
     let plan: SidecarPlan = serde_json::from_slice(&plan_bytes).wrap_err("parse sidecar plan")?;
     info!(
         hostname = %plan.hostname,
-        ports = plan.ports.len(),
+        port = plan.port,
         "sidecar starting"
     );
 
-    let tls_acceptor = load_tls(&dir, &plan.hostname);
+    let mut tasks = vec![tokio::spawn(serve_plain(HTTP_PORT, plan.port))];
 
-    let mut tasks = Vec::new();
-    for port in plan.ports {
-        if port.tls {
-            let Some(acceptor) = tls_acceptor.clone() else {
-                tracing::warn!(
-                    host = port.host,
-                    container = port.container,
-                    "TLS port skipped: no usable cert"
-                );
-                continue;
-            };
-            tasks.push(tokio::spawn(serve_tls(port.host, port.container, acceptor)));
-        } else {
-            tasks.push(tokio::spawn(serve_plain(port.host, port.container)));
-        }
-    }
-
-    if tasks.is_empty() {
-        eyre::bail!("no listeners configured");
+    match load_tls(&dir, &plan.hostname) {
+        Some(acceptor) => tasks.push(tokio::spawn(serve_tls(HTTPS_PORT, plan.port, acceptor))),
+        None => tracing::warn!(
+            hostname = %plan.hostname,
+            "no usable cert: serving http only"
+        ),
     }
 
     // If any listener task exits, the sidecar exits — the proxy/docker

@@ -49,12 +49,12 @@ async fn main() -> Result<()> {
                 Some(ca)
             }
             Err(e) => {
-                tracing::warn!(dir, "failed to load CA: {e:?}; TLS ports disabled");
+                tracing::warn!(dir, "failed to load CA: {e:?}; services will be served over http only");
                 None
             }
         }
     } else {
-        info!("no {ENV_CA_DIR}; TLS ports disabled");
+        info!("no {ENV_CA_DIR}; services will be served over http only");
         None
     };
 

@@ -20,13 +20,13 @@ use rustls::pki_types::pem::PemObject;
 use rustls::pki_types::{CertificateDer, ServerName};
 use rustls::{ClientConfig, RootCertStore};
 use serde::Serialize;
-use shared::{ENV_CA_DIR, PROXY_CONTAINER_NAME, ProxyPort};
+use shared::{ENV_CA_DIR, PROXY_CONTAINER_NAME};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio_rustls::TlsConnector;
 
 use super::ProxyChecks;
-use super::endpoints::{Endpoint, Sidecar};
+use super::endpoints::{Endpoint, ProxyPort, Sidecar};
 use crate::ansi::{GRAY, GREEN, RED, RESET};
 use crate::cli::proxy::{PROXY_IMAGE, dns};
 use crate::table::Datum;
@@ -502,14 +502,14 @@ pub(super) async fn run(probe: &Probe, endpoint: &Endpoint, out: &mut Publisher<
     let Some(port) = endpoint.port else {
         // DNS-only: there's no port to reach, and that's not a fault.
         out.update(|c| {
-            c.connect = Datum::Value(Check::skip_because("no ports are configured"));
+            c.connect = Datum::Value(Check::skip_because("no containerPort is configured"));
             c.tls = Datum::Value(Check::skip());
             c.app = Datum::Value(Check::skip());
         });
         return;
     };
 
-    let addr = SocketAddr::new(ip, port.host);
+    let addr = SocketAddr::new(ip, port.kind.host_port());
     let stream = match connect(addr, port, out).await {
         Some(stream) => stream,
         None => {
@@ -521,7 +521,7 @@ pub(super) async fn run(probe: &Probe, endpoint: &Endpoint, out: &mut Publisher<
         }
     };
 
-    if port.tls {
+    if port.kind.is_tls() {
         check_tls_app(probe, &hostname, port, stream, out).await;
     } else {
         out.update(|c| c.tls = Datum::Value(Check::skip()));
@@ -716,7 +716,7 @@ async fn connect(
         Ok(Err(e)) if e.kind() == std::io::ErrorKind::ConnectionRefused => (
             Check::fail(format!(
                 "nothing is listening on {addr} (port {} of the service)",
-                port.host,
+                port.kind.host_port(),
             )),
             None,
         ),
@@ -806,17 +806,10 @@ async fn check_tls_app(
     out.update(|c| c.app = Datum::Value(check));
 }
 
-/// A plain remapped port is a byte splice, so there's no protocol to speak.
-/// The sidecar hangs up immediately when its own upstream connect fails, which
-/// is the signal we look for — it works for postgres as well as for HTTP.
+/// The http port is a byte splice, so there's no protocol to speak. The
+/// sidecar hangs up immediately when its own upstream connect fails, which is
+/// the signal we look for.
 async fn check_plain_app(port: ProxyPort, mut stream: TcpStream, out: &mut Publisher<RowChecks>) {
-    if port.host == port.container {
-        // No sidecar in the path: the app bound this port itself, so the
-        // connection we already have is the proof.
-        out.update(|c| c.app = Datum::Value(Check::ok()));
-        return;
-    }
-
     let mut buf = [0u8; 1];
     let check = match tokio::time::timeout(HANGUP_WINDOW, stream.read(&mut buf)).await {
         // Still open: the sidecar spliced us through to something.
@@ -914,20 +907,17 @@ fn join(addrs: &[IpAddr]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cli::proxy::status::endpoints::{ExpectedSidecar, Target};
+    use crate::cli::proxy::status::endpoints::{ExpectedSidecar, ProxyKind, Target};
 
-    /// An endpoint for `feature/app` with one TLS port, whose service expects a
-    /// sidecar.
+    /// The https endpoint for `feature/app`, whose service expects a sidecar.
     fn endpoint() -> Endpoint {
         let port = ProxyPort {
-            ip: std::net::IpAddr::from([0, 0, 0, 0]),
-            host: 443,
+            kind: ProxyKind::Https,
             container: 8080,
-            tls: true,
         };
         let plan = shared::SidecarPlan {
             hostname: "feature.app.test".to_string(),
-            ports: vec![port],
+            port: port.container,
         };
         Endpoint {
             project: "proj".to_string(),
@@ -1035,15 +1025,11 @@ mod tests {
         assert_eq!(check.short.as_deref(), Some("?"));
     }
 
+    /// A DNS-only service has nothing in front of it to check.
     #[test]
-    fn a_port_the_app_binds_itself_needs_no_sidecar() {
+    fn a_service_with_no_container_port_needs_no_sidecar() {
         let mut endpoint = endpoint();
-        endpoint.port = Some(ProxyPort {
-            ip: std::net::IpAddr::from([0, 0, 0, 0]),
-            host: 3000,
-            container: 3000,
-            tls: false,
-        });
+        endpoint.port = None;
         assert_eq!(
             check_sidecar(&probe(Vec::new()), &endpoint, "target-cid").outcome,
             Outcome::Skip,

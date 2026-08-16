@@ -7,8 +7,6 @@
 //! the CLI builds from `customizations.devconcurrent.proxy` in
 //! `devcontainer.json`. No transformation, no separate wire struct.
 
-use std::net::{IpAddr, Ipv4Addr};
-
 use indexmap::IndexMap;
 use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
 use serde::de::{self, Deserializer};
@@ -186,6 +184,12 @@ impl handlebars::HelperDef for HostnameHelper {
     }
 }
 
+/// The fixed pair of ports the proxy binds in front of every proxied service.
+/// Both reach the service on its `containerPort`, which is why that port can
+/// be neither of these.
+pub const HTTP_PORT: u16 = 80;
+pub const HTTPS_PORT: u16 = 443;
+
 #[derive(Deserialize, Serialize, Clone, Debug, Default, JsonSchema)]
 #[serde(rename_all = "camelCase", default)]
 pub struct ProxyService {
@@ -193,61 +197,13 @@ pub struct ProxyService {
     /// project-level `hostname`; same variables are available.
     pub hostname: Option<Template>,
 
-    pub ports: Vec<ProxyPort>,
-}
-
-/// Port mapping for a single (host, container) pair on a service.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, JsonSchema)]
-pub struct ProxyPort {
-    /// The IP address to listen on. Defaults to 0.0.0.0, allowing traffic in
-    /// from any source.
-    #[serde(default = "default_ip")]
-    pub ip: IpAddr,
-    pub host: u16,
-    pub container: u16,
-    /// Terminate TLS on `host` and forward plaintext to `container`. Requires
-    /// `proxy.caRoot` to be configured.
-    #[serde(default)]
-    pub tls: bool,
-}
-
-fn default_ip() -> IpAddr {
-    IpAddr::V4(Ipv4Addr::UNSPECIFIED)
-}
-
-impl<'de> Deserialize<'de> for ProxyPort {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        #[derive(Deserialize)]
-        #[serde(rename_all = "camelCase")]
-        struct Raw {
-            #[serde(default = "default_ip")]
-            ip: IpAddr,
-            host: u16,
-            container: u16,
-            #[serde(default)]
-            tls: bool,
-        }
-
-        let Raw {
-            ip,
-            host,
-            container,
-            tls,
-        } = Raw::deserialize(deserializer)?;
-
-        if tls && host == container {
-            return Err(de::Error::custom(format!(
-                "tls port mapping {host}:{container} has host == container; TLS termination requires a distinct host port (e.g. host: 443, container: {container})"
-            )));
-        }
-
-        Ok(Self {
-            ip,
-            host,
-            container,
-            tls,
-        })
-    }
+    /// The port on which your service listens inside the container. The proxy
+    /// serves it on ports 80 and 443, terminating TLS on 443, so whatever
+    /// listens here must speak plain HTTP.
+    ///
+    /// All ports other than 80 and 443 are forwarded raw to the service, whether
+    /// this is set or not.
+    pub container_port: Option<u16>,
 }
 
 /// A Handlebars template, compiled at deserialization time so syntax errors
@@ -324,7 +280,8 @@ impl JsonSchema for Template {
 pub struct SidecarPlan {
     /// Rendered hostname for this service; used as the TLS cert's SAN.
     pub hostname: String,
-    pub ports: Vec<ProxyPort>,
+    /// The container port to forward to.
+    pub port: u16,
 }
 
 impl SidecarPlan {
@@ -451,49 +408,31 @@ mod tests {
         );
     }
 
+    /// The key the whole config now hangs on, so pin its spelling.
     #[test]
-    fn rejects_tls_with_same_port() {
-        let err =
-            serde_json::from_str::<ProxyPort>(r#"{"host": 443, "container": 443, "tls": true}"#)
-                .unwrap_err()
-                .to_string();
-        assert!(err.contains("tls port"), "got: {err}");
+    fn deserializes_container_port() {
+        let svc: ProxyService = serde_json::from_str(r#"{"containerPort": 3000}"#).unwrap();
+        assert_eq!(svc.container_port, Some(3000));
     }
 
+    /// A service may exist purely so the proxy answers DNS for its hostname.
     #[test]
-    fn accepts_tls_with_different_ports() {
-        let p: ProxyPort =
-            serde_json::from_str(r#"{"host": 443, "container": 3000, "tls": true}"#).unwrap();
-        assert_eq!(p.host, 443);
-        assert_eq!(p.container, 3000);
-        assert!(p.tls);
+    fn container_port_is_optional() {
+        let svc: ProxyService =
+            serde_json::from_str(r#"{"hostname": "{{workspace}}.test"}"#).unwrap();
+        assert_eq!(svc.container_port, None);
     }
 
-    #[test]
-    fn allows_same_port_without_tls() {
-        let p: ProxyPort = serde_json::from_str(r#"{"host": 3000, "container": 3000}"#).unwrap();
-        assert_eq!(p.host, 3000);
-        assert!(!p.tls);
-    }
-
-    fn plan(hostname: &str, ports: &[(u16, u16, bool)]) -> SidecarPlan {
+    fn plan(hostname: &str, port: u16) -> SidecarPlan {
         SidecarPlan {
             hostname: hostname.to_string(),
-            ports: ports
-                .iter()
-                .map(|&(host, container, tls)| ProxyPort {
-                    ip: default_ip(),
-                    host,
-                    container,
-                    tls,
-                })
-                .collect(),
+            port,
         }
     }
 
     #[test]
     fn plan_hash_is_deterministic_and_a_valid_label_value() {
-        let plan = plan("feature.app.test", &[(443, 8080, true), (80, 8080, false)]);
+        let plan = plan("feature.app.test", 8080);
         let hash = plan.hash();
         assert_eq!(hash, plan.hash());
         assert_eq!(hash.len(), 64);
@@ -505,14 +444,9 @@ mod tests {
 
     #[test]
     fn plan_hash_changes_when_any_input_changes() {
-        let base = plan("feature.app.test", &[(443, 8080, true)]).hash();
-        assert_ne!(base, plan("other.app.test", &[(443, 8080, true)]).hash());
-        assert_ne!(base, plan("feature.app.test", &[(443, 3000, true)]).hash());
-        assert_ne!(base, plan("feature.app.test", &[(443, 8080, false)]).hash());
-        assert_ne!(
-            base,
-            plan("feature.app.test", &[(443, 8080, true), (80, 8080, false)]).hash(),
-        );
+        let base = plan("feature.app.test", 8080).hash();
+        assert_ne!(base, plan("other.app.test", 8080).hash());
+        assert_ne!(base, plan("feature.app.test", 3000).hash());
     }
 
     #[test]

@@ -231,23 +231,23 @@ impl DevcontainerConfig {
         let config: Self = figment
             .extract()
             .wrap_err("failed to merge devcontainer config")?;
-        config.check_proxy_port_conflicts()?;
+        config.check_proxy_container_ports()?;
         Ok(Some(config))
     }
 
-    fn check_proxy_port_conflicts(&self) -> eyre::Result<()> {
-        use std::collections::HashMap;
-        use std::net::IpAddr;
+    /// The proxy binds 80 and 443 in the service's own network namespace, so a
+    /// service listening on either has already taken a port the proxy needs.
+    fn check_proxy_container_ports(&self) -> eyre::Result<()> {
         for (svc_name, svc) in &self.customizations.devconcurrent.proxy.services {
-            let mut seen: HashMap<(IpAddr, u16), &shared::ProxyPort> = HashMap::new();
-            for p in &svc.ports {
-                if let Some(prev) = seen.insert((p.ip, p.host), p) {
-                    eyre::bail!(
-                        "service {svc_name:?}: conflicting proxy port entries on {}:{}: {prev:?} vs {p:?} (check for `proxy` defined in both devcontainer.json and the project's devcontainer override)",
-                        p.ip,
-                        p.host,
-                    );
-                }
+            let Some(port) = svc.container_port else {
+                continue;
+            };
+            if port == shared::HTTP_PORT || port == shared::HTTPS_PORT {
+                eyre::bail!(
+                    "service {svc_name:?}: `containerPort` cannot be {port}, because that is a \
+                     port the proxy serves the service on. Have the service listen on another \
+                     port and speak plain http; the proxy handles TLS.",
+                );
             }
         }
         Ok(())

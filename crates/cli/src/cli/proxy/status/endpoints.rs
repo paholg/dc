@@ -17,7 +17,7 @@ use docker::{
 };
 use eyre::{Result, WrapErr};
 use indexmap::IndexMap;
-use shared::{ProxyOptions, ProxyPort, ProxyService, SidecarPlan};
+use shared::{HTTP_PORT, HTTPS_PORT, ProxyOptions, ProxyService, SidecarPlan};
 
 /// Everything `proxy status` checks, plus the sidecars it found along the way.
 pub(super) struct Discovery {
@@ -25,8 +25,37 @@ pub(super) struct Discovery {
     pub(super) sidecars: Vec<Sidecar>,
 }
 
-/// One row: a single port of a single service, or — for a service with no port
-/// mappings — the hostname on its own, which the proxy still answers DNS for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum ProxyKind {
+    Http,
+    Https,
+}
+
+impl ProxyKind {
+    pub(super) fn host_port(&self) -> u16 {
+        match self {
+            ProxyKind::Http => HTTP_PORT,
+            ProxyKind::Https => HTTPS_PORT,
+        }
+    }
+
+    pub(super) fn is_tls(&self) -> bool {
+        matches!(self, ProxyKind::Https)
+    }
+}
+
+/// One listener the proxy puts in front of a service. Derived from the
+/// service's `containerPort`: every proxied service gets https on 443 and http
+/// on 80.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct ProxyPort {
+    pub(super) kind: ProxyKind,
+    pub(super) container: u16,
+}
+
+/// One row: a single port of a single service, or — for a service with no
+/// container port — the hostname on its own, which the proxy still answers
+/// DNS for.
 pub(super) struct Endpoint {
     pub(super) project: String,
     pub(super) workspace: String,
@@ -65,11 +94,8 @@ pub(super) struct Sidecar {
 }
 
 impl Endpoint {
-    /// A port is served by a sidecar unless the app binds it itself: a plain
-    /// mapping where host and container agree is a no-op the proxy skips
-    /// (`crates/proxy/src/sidecar.rs`).
     pub(super) fn needs_sidecar(&self) -> bool {
-        self.port.is_some_and(|p| p.tls || p.host != p.container)
+        self.port.is_some()
     }
 
     pub(super) fn key(&self) -> (String, String, String) {
@@ -186,9 +212,9 @@ fn build(containers: &[ContainerSummary], options: &BTreeMap<String, ProxyOption
     }
 }
 
-/// One endpoint per configured port, or a single DNS-only endpoint when the
-/// service has no port mappings — the proxy registers a hostname for it either
-/// way.
+/// The https and http endpoints the proxy serves a service on, or a single
+/// DNS-only endpoint when the service declares no container port — the proxy
+/// registers a hostname for it either way.
 fn rows_for(
     opts: &ProxyOptions,
     project: &str,
@@ -200,7 +226,6 @@ fn rows_for(
 ) -> Vec<Endpoint> {
     let hostname = opts.render_hostname(project, workspace, service, root);
     let sidecar = svc.and_then(|svc| expected_sidecar(hostname.as_deref(), svc));
-    let ports = svc.map(|s| s.ports.as_slice()).unwrap_or_default();
 
     let row = |port: Option<ProxyPort>| Endpoint {
         project: project.to_string(),
@@ -213,27 +238,29 @@ fn rows_for(
         collides_with: None,
     };
 
-    if ports.is_empty() {
+    let Some(container) = svc.and_then(|s| s.container_port) else {
         return vec![row(None)];
-    }
-    ports.iter().map(|port| row(Some(*port))).collect()
+    };
+
+    vec![
+        row(Some(ProxyPort {
+            kind: ProxyKind::Https,
+            container,
+        })),
+        row(Some(ProxyPort {
+            kind: ProxyKind::Http,
+            container,
+        })),
+    ]
 }
 
 /// The plan the proxy would build for this service, hashed the same way it
 /// stamps it on the sidecar it creates.
 fn expected_sidecar(hostname: Option<&str>, svc: &ProxyService) -> Option<Arc<ExpectedSidecar>> {
-    let ports: Vec<ProxyPort> = svc
-        .ports
-        .iter()
-        .copied()
-        .filter(|p| p.tls || p.host != p.container)
-        .collect();
-    if ports.is_empty() {
-        return None;
-    }
+    let port = svc.container_port?;
     // The proxy falls back to this shape when a template fails to render.
     let hostname = hostname?.to_string();
-    let plan = SidecarPlan { hostname, ports };
+    let plan = SidecarPlan { hostname, port };
     Some(Arc::new(ExpectedSidecar {
         plan_hash: plan.hash(),
     }))
@@ -357,17 +384,14 @@ mod tests {
         json!({
             "enable": true,
             "services": {
-                "app": {"ports": [
-                    {"host": 443, "container": 8080, "tls": true},
-                    {"host": 8080, "container": 8080},
-                ]},
-                "db": {"ports": []},
+                "app": {"containerPort": 8080},
+                "db": {},
             },
         })
     }
 
     #[test]
-    fn one_row_per_port_and_a_dns_only_row_for_a_portless_service() {
+    fn an_https_and_http_row_per_service_and_a_dns_only_row_for_a_portless_service() {
         let containers = [
             container(
                 "app-cid",
@@ -396,7 +420,7 @@ mod tests {
             .map(|e| {
                 (
                     e.service.as_str(),
-                    e.port.map(|p| p.host),
+                    e.port.map(|p| p.kind.host_port()),
                     e.hostname.clone().unwrap(),
                 )
             })
@@ -405,16 +429,15 @@ mod tests {
             rows,
             [
                 ("app", Some(443), "feature.app.test".to_string()),
-                ("app", Some(8080), "feature.app.test".to_string()),
+                ("app", Some(80), "feature.app.test".to_string()),
                 ("db", None, "feature.db.test".to_string()),
             ]
         );
     }
 
-    #[test]
-    fn a_sidecar_is_expected_only_for_ports_that_need_one() {
-        let containers = [container(
-            "app-cid",
+    fn app_container(id: &str) -> ContainerSummary {
+        container(
+            id,
             &[
                 (COMPOSE_PROJECT_LABEL, "feature_devcontainer"),
                 (COMPOSE_SERVICE_LABEL, "app"),
@@ -422,17 +445,21 @@ mod tests {
                 (WORKSPACE_LABEL, "feature"),
             ],
             "172.18.0.2",
-        )];
+        )
+    }
+
+    #[test]
+    fn both_rows_of_a_service_depend_on_its_sidecar() {
+        let containers = [app_container("app-cid")];
 
         let found = build(&containers, &options(app_and_db()));
-        let tls = &found.endpoints[0];
-        let plain = &found.endpoints[1];
-        // Both rows belong to a service that has a sidecar...
+        let [tls, plain] = &found.endpoints[..2] else {
+            panic!("expected an https and an http row");
+        };
         assert!(tls.sidecar.is_some());
         assert!(plain.sidecar.is_some());
-        // ...but only the remapped one actually depends on it.
         assert!(tls.needs_sidecar());
-        assert!(!plain.needs_sidecar());
+        assert!(plain.needs_sidecar());
     }
 
     #[test]

@@ -713,47 +713,18 @@
           ],
           "default": null
         },
-        "ports": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/ProxyPort"
-          },
-          "default": []
+        "containerPort": {
+          "description": "The port on which your service listens inside the container. The proxy\nserves it on ports 80 and 443, terminating TLS on 443, so whatever\nlistens here must speak plain HTTP.\n\nAll ports other than 80 and 443 are forwarded raw to the service, whether\nthis is set or not.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint16",
+          "minimum": 0,
+          "maximum": 65535,
+          "default": null
         }
       }
-    },
-    "ProxyPort": {
-      "description": "Port mapping for a single (host, container) pair on a service.",
-      "type": "object",
-      "properties": {
-        "ip": {
-          "description": "The IP address to listen on. Defaults to 0.0.0.0, allowing traffic in\nfrom any source.",
-          "type": "string",
-          "format": "ip",
-          "default": "0.0.0.0"
-        },
-        "host": {
-          "type": "integer",
-          "format": "uint16",
-          "minimum": 0,
-          "maximum": 65535
-        },
-        "container": {
-          "type": "integer",
-          "format": "uint16",
-          "minimum": 0,
-          "maximum": 65535
-        },
-        "tls": {
-          "description": "Terminate TLS on `host` and forward plaintext to `container`. Requires\n`proxy.caRoot` to be configured.",
-          "type": "boolean",
-          "default": false
-        }
-      },
-      "required": [
-        "host",
-        "container"
-      ]
     },
     "ProxyGlobal": {
       "description": "Global user proxy settings.",
@@ -768,7 +739,7 @@
           "default": 43770
         },
         "caRoot": {
-          "description": "Path to mkcert's CAROOT directory on the host. Required for `tls: true`\nport mappings; leave unset to disable TLS termination. Find it with\n`mkcert -CAROOT`.",
+          "description": "Path to mkcert's CAROOT directory on the host. Required to serve\nservices over https; leave unset to serve them over http only. Find it\nwith `mkcert -CAROOT`.",
           "type": [
             "string",
             "null"

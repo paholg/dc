@@ -285,12 +285,13 @@ fn spawn_proxy_checks(
     let port = proxy.config.port;
     let ca_root = proxy.config.ca_root.clone();
     let expected_hash = proxy.config_hash();
+    // Every proxied service is served over https, so any one of them is reason
+    // enough to check the CA.
     let wants_tls = proxy
         .options
         .values()
         .flat_map(|o| o.services.values())
-        .flat_map(|s| s.ports.iter())
-        .any(|p| p.tls);
+        .any(|s| s.container_port.is_some());
 
     Gatherer::progressive(move |mut out| async move {
         loop {
@@ -409,8 +410,7 @@ fn endpoint_table(rows: &[Row], live: bool) -> Table {
 fn fmt_port(row: &Row) -> String {
     match row.endpoint.port {
         None => "-".to_string(),
-        Some(p) if p.host == p.container => p.host.to_string(),
-        Some(p) => format!("{}→{}", p.host, p.container),
+        Some(p) => format!("{}→{}", p.kind.host_port(), p.container),
     }
 }
 
@@ -534,9 +534,9 @@ async fn emit_json(proxy: &Gatherer<ProxyChecks>, rows: &[Row]) -> Result<()> {
                 workspace: &row.endpoint.workspace,
                 service: &row.endpoint.service,
                 hostname: row.endpoint.hostname.as_deref(),
-                host_port: row.endpoint.port.map(|p| p.host),
+                host_port: row.endpoint.port.map(|p| p.kind.host_port()),
                 container_port: row.endpoint.port.map(|p| p.container),
-                tls: row.endpoint.port.is_some_and(|p| p.tls),
+                tls: row.endpoint.port.is_some_and(|p| p.kind.is_tls()),
                 checks,
             })
             .collect(),

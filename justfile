@@ -1,4 +1,4 @@
-check: lint test
+check: lint test check-schema
 
 fix: _fix check
 
@@ -54,6 +54,11 @@ _fix:
 
 gen:
     cargo run -q -p gen
+
+# Validate the generated JSON Schema with Ajv in strict mode.
+check-schema:
+    npx --yes --package=ajv-cli ajv compile -s docs/src/devconcurrent.schema.json \
+        -c ./ajv.config.js --spec=draft7 --strict=true
 
 lint:
     cargo fmt --all -- --check

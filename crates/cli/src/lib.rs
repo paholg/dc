@@ -140,7 +140,10 @@ fn shell_function(shell: Shell) -> eyre::Result<String> {
 /// Produce the JSON schema for [`config::Config`].
 #[must_use]
 pub fn schema() -> schemars::Schema {
-    schemars::schema_for!(config::Config)
+    // SchemaStore recommends draft-07 for the best editor support.
+    schemars::generate::SchemaSettings::draft07()
+        .into_generator()
+        .into_root_schema_for::<config::Config>()
 }
 
 /// The CLI's clap definition, for the `gen` crate to document.

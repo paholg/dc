@@ -1,5 +1,6 @@
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://devconcurrent.paholg.com/devconcurrent.schema.json",
+  "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "Config",
   "type": "object",
   "properties": {
@@ -9,28 +10,36 @@
       "additionalProperties": false,
       "patternProperties": {
         "^[A-Za-z0-9_-]+$": {
-          "$ref": "#/$defs/Project"
+          "$ref": "#/definitions/Project"
         }
       }
     },
     "proxy": {
       "description": "Global proxy settings.",
-      "$ref": "#/$defs/ProxyGlobal",
       "default": {
         "port": 43770,
         "caRoot": null
-      }
+      },
+      "allOf": [
+        {
+          "$ref": "#/definitions/ProxyGlobal"
+        }
+      ]
     },
     "shell": {
       "description": "Shell-integration settings.",
-      "$ref": "#/$defs/ShellGlobal",
       "default": {
         "exportEnv": false
-      }
+      },
+      "allOf": [
+        {
+          "$ref": "#/definitions/ShellGlobal"
+        }
+      ]
     }
   },
   "x-tombi-toml-version": "v1.1.0",
-  "$defs": {
+  "definitions": {
     "Project": {
       "description": "A devconcurrent-enabled project.",
       "type": "object",
@@ -51,7 +60,7 @@
           "description": "Any of the options from `devcontainer.json` (<https://containers.dev/implementors/json_reference/>),\nas per-user overrides. These are merged with the project's `devcontainer.json`, with arrays\nconcatenated and this file winning conflicts.",
           "anyOf": [
             {
-              "$ref": "#/$defs/DevcontainerConfig"
+              "$ref": "#/definitions/DevcontainerConfig"
             },
             {
               "type": "null"
@@ -69,8 +78,12 @@
       "properties": {
         "dockerComposeFile": {
           "description": "The name of the docker-compose file(s) used to start the services.",
-          "$ref": "#/$defs/OneOrMany(Template,PreferOne)",
-          "default": []
+          "default": [],
+          "allOf": [
+            {
+              "$ref": "#/definitions/OneOrMany(Template,PreferOne)"
+            }
+          ]
         },
         "service": {
           "description": "The service you want to work on. This is considered the primary container for your dev\nenvironment which your editor will connect to.",
@@ -90,13 +103,21 @@
         },
         "workspaceFolder": {
           "description": "The path of the workspace folder inside the container. This is typically the target path of\na volume mount in the docker-compose.yml.",
-          "$ref": "#/$defs/Template",
-          "default": ""
+          "default": "",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Template"
+            }
+          ]
         },
         "shutdownAction": {
           "description": "Action to take when the user disconnects from the primary container in their editor. The\ndefault is to stop all of the compose containers.",
-          "$ref": "#/$defs/ComposeShutdownAction",
-          "default": "stopCompose"
+          "default": "stopCompose",
+          "allOf": [
+            {
+              "$ref": "#/definitions/ComposeShutdownAction"
+            }
+          ]
         },
         "overrideCommand": {
           "description": "Whether to overwrite the command specified in the image. The default is false.",
@@ -115,7 +136,7 @@
           "description": "A name for the dev container which can be displayed to the user.",
           "anyOf": [
             {
-              "$ref": "#/$defs/Template"
+              "$ref": "#/definitions/Template"
             },
             {
               "type": "null"
@@ -141,14 +162,14 @@
         "forwardPorts": {
           "type": "array",
           "items": {
-            "$ref": "#/$defs/ForwardPort"
+            "$ref": "#/definitions/ForwardPort"
           },
           "default": []
         },
         "portsAttributes": {
           "type": "object",
           "additionalProperties": {
-            "$ref": "#/$defs/PortAttributes"
+            "$ref": "#/definitions/PortAttributes"
           },
           "default": {}
         },
@@ -156,7 +177,7 @@
           "description": "Set default properties that are applied to all ports that don't get properties from the\nsetting `remote.portsAttributes`",
           "anyOf": [
             {
-              "$ref": "#/$defs/PortAttributes"
+              "$ref": "#/definitions/PortAttributes"
             },
             {
               "type": "null"
@@ -176,7 +197,7 @@
           "description": "Container environment variables.",
           "type": "object",
           "additionalProperties": {
-            "$ref": "#/$defs/Template"
+            "$ref": "#/definitions/Template"
           },
           "default": {}
         },
@@ -184,7 +205,7 @@
           "description": "The user the container will be started with. The default is the user on the Docker image.",
           "anyOf": [
             {
-              "$ref": "#/$defs/Template"
+              "$ref": "#/definitions/Template"
             },
             {
               "type": "null"
@@ -195,7 +216,7 @@
         "mounts": {
           "type": "array",
           "items": {
-            "$ref": "#/$defs/MountEntry"
+            "$ref": "#/definitions/MountEntry"
           },
           "default": []
         },
@@ -237,7 +258,7 @@
           "additionalProperties": {
             "anyOf": [
               {
-                "$ref": "#/$defs/Template"
+                "$ref": "#/definitions/Template"
               },
               {
                 "type": "null"
@@ -250,7 +271,7 @@
           "description": "The username to use for spawning processes in the container including\nlifecycle scripts and any remote editor/IDE server process. The default\nis the same user as the container.",
           "anyOf": [
             {
-              "$ref": "#/$defs/Template"
+              "$ref": "#/definitions/Template"
             },
             {
               "type": "null"
@@ -262,7 +283,7 @@
           "description": "A command to run locally (i.e Your host machine, cloud VM) before anything else. This\ncommand is run before \"onCreateCommand\".",
           "anyOf": [
             {
-              "$ref": "#/$defs/LifecycleCommandTemplate"
+              "$ref": "#/definitions/LifecycleCommandTemplate"
             },
             {
               "type": "null"
@@ -274,7 +295,7 @@
           "description": "A command to run when creating the container. This command is run after \"initializeCommand\"\nand before \"updateContentCommand\".",
           "anyOf": [
             {
-              "$ref": "#/$defs/LifecycleCommandTemplate"
+              "$ref": "#/definitions/LifecycleCommandTemplate"
             },
             {
               "type": "null"
@@ -286,7 +307,7 @@
           "description": "A command to run when creating the container and rerun when the workspace content was\nupdated while creating the container. This command is run after \"onCreateCommand\" and before\n\"postCreateCommand\".",
           "anyOf": [
             {
-              "$ref": "#/$defs/LifecycleCommandTemplate"
+              "$ref": "#/definitions/LifecycleCommandTemplate"
             },
             {
               "type": "null"
@@ -298,7 +319,7 @@
           "description": "A command to run after creating the container. This command is run after\n\"updateContentCommand\" and before \"postStartCommand\".",
           "anyOf": [
             {
-              "$ref": "#/$defs/LifecycleCommandTemplate"
+              "$ref": "#/definitions/LifecycleCommandTemplate"
             },
             {
               "type": "null"
@@ -310,7 +331,7 @@
           "description": "A command to run after starting the container. This command is run after \"postCreateCommand\"\nand before \"postAttachCommand\".",
           "anyOf": [
             {
-              "$ref": "#/$defs/LifecycleCommandTemplate"
+              "$ref": "#/definitions/LifecycleCommandTemplate"
             },
             {
               "type": "null"
@@ -322,7 +343,7 @@
           "description": "A command to run when attaching to the container. This command is run after\n\"postStartCommand\".",
           "anyOf": [
             {
-              "$ref": "#/$defs/LifecycleCommandTemplate"
+              "$ref": "#/definitions/LifecycleCommandTemplate"
             },
             {
               "type": "null"
@@ -332,19 +353,27 @@
         },
         "waitFor": {
           "description": "The user command to wait for before continuing execution in the background while the UI is\nstarting up.",
-          "$ref": "#/$defs/WaitFor",
-          "default": "updateContentCommand"
+          "default": "updateContentCommand",
+          "allOf": [
+            {
+              "$ref": "#/definitions/WaitFor"
+            }
+          ]
         },
         "userEnvProbe": {
           "description": "User environment probe to run.",
-          "$ref": "#/$defs/UserEnvProbe",
-          "default": "loginInteractiveShell"
+          "default": "loginInteractiveShell",
+          "allOf": [
+            {
+              "$ref": "#/definitions/UserEnvProbe"
+            }
+          ]
         },
         "hostRequirements": {
           "description": "Host hardware requirements.",
           "anyOf": [
             {
-              "$ref": "#/$defs/HostRequirements"
+              "$ref": "#/definitions/HostRequirements"
             },
             {
               "type": "null"
@@ -354,7 +383,6 @@
         },
         "customizations": {
           "description": "Tool-specific configuration. Each tool should use a JSON object subproperty with a unique\nname to group its customizations.",
-          "$ref": "#/$defs/Customizations",
           "default": {
             "devconcurrent": {
               "worktreeFolder": null,
@@ -366,19 +394,24 @@
               },
               "env": {}
             }
-          }
+          },
+          "allOf": [
+            {
+              "$ref": "#/definitions/Customizations"
+            }
+          ]
         }
       }
     },
     "OneOrMany(Template,PreferOne)": {
       "anyOf": [
         {
-          "$ref": "#/$defs/Template"
+          "$ref": "#/definitions/Template"
         },
         {
           "type": "array",
           "items": {
-            "$ref": "#/$defs/Template"
+            "$ref": "#/definitions/Template"
           }
         }
       ]
@@ -413,8 +446,12 @@
       "type": "object",
       "properties": {
         "onAutoForward": {
-          "$ref": "#/$defs/OnAutoForward",
-          "default": "notify"
+          "default": "notify",
+          "allOf": [
+            {
+              "$ref": "#/definitions/OnAutoForward"
+            }
+          ]
         },
         "elevateIfNeeded": {
           "type": "boolean",
@@ -425,8 +462,12 @@
           "default": "Application"
         },
         "protocol": {
-          "$ref": "#/$defs/Protocol",
-          "default": "http"
+          "default": "http",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Protocol"
+            }
+          ]
         },
         "requireLocalPort": {
           "type": "boolean",
@@ -456,10 +497,14 @@
       "anyOf": [
         {
           "description": "Docker `--mount` short form: `type=bind,source=...,target=...`.",
-          "$ref": "#/$defs/Template"
+          "allOf": [
+            {
+              "$ref": "#/definitions/Template"
+            }
+          ]
         },
         {
-          "$ref": "#/$defs/Mount"
+          "$ref": "#/definitions/Mount"
         }
       ]
     },
@@ -467,12 +512,12 @@
       "type": "object",
       "properties": {
         "type": {
-          "$ref": "#/$defs/MountType"
+          "$ref": "#/definitions/MountType"
         },
         "source": {
           "anyOf": [
             {
-              "$ref": "#/$defs/Template"
+              "$ref": "#/definitions/Template"
             },
             {
               "type": "null"
@@ -481,7 +526,7 @@
           "default": null
         },
         "target": {
-          "$ref": "#/$defs/Template"
+          "$ref": "#/definitions/Template"
         }
       },
       "required": [
@@ -500,12 +545,12 @@
       "description": "A lifecycle command as written in config, before `${...}` substitution.",
       "anyOf": [
         {
-          "$ref": "#/$defs/CmdTemplate"
+          "$ref": "#/definitions/CmdTemplate"
         },
         {
           "type": "object",
           "additionalProperties": {
-            "$ref": "#/$defs/CmdTemplate"
+            "$ref": "#/definitions/CmdTemplate"
           }
         }
       ]
@@ -514,12 +559,12 @@
       "description": "A command as written in config, before `${...}` substitution.",
       "anyOf": [
         {
-          "$ref": "#/$defs/Template"
+          "$ref": "#/definitions/Template"
         },
         {
           "type": "array",
           "items": {
-            "$ref": "#/$defs/Template"
+            "$ref": "#/definitions/Template"
           }
         }
       ]
@@ -570,8 +615,12 @@
           "default": null
         },
         "gpu": {
-          "$ref": "#/$defs/GpuRequirement",
-          "default": false
+          "default": false,
+          "allOf": [
+            {
+              "$ref": "#/definitions/GpuRequirement"
+            }
+          ]
         }
       }
     },
@@ -581,7 +630,7 @@
           "type": "boolean"
         },
         {
-          "$ref": "#/$defs/GpuOptional"
+          "$ref": "#/definitions/GpuOptional"
         },
         {
           "type": "object",
@@ -616,7 +665,6 @@
       "type": "object",
       "properties": {
         "devconcurrent": {
-          "$ref": "#/$defs/DcOptions",
           "default": {
             "worktreeFolder": null,
             "mountGit": null,
@@ -626,7 +674,12 @@
               "services": {}
             },
             "env": {}
-          }
+          },
+          "allOf": [
+            {
+              "$ref": "#/definitions/DcOptions"
+            }
+          ]
         }
       }
     },
@@ -651,12 +704,16 @@
         },
         "proxy": {
           "description": "Configure DNS hostnames and HTTP proxy.",
-          "$ref": "#/$defs/ProxyOptions",
           "default": {
             "enable": false,
             "hostname": null,
             "services": {}
-          }
+          },
+          "allOf": [
+            {
+              "$ref": "#/definitions/ProxyOptions"
+            }
+          ]
         },
         "env": {
           "description": "Define shell variables\n\nThese are rendered by `dc show env` or automatically set if `shell.exportEnv` is true.\n\nThe values are given by handlebars templates with the following:\n  * The `hostname` helper gives the hostname for a service.\n  * The following variables are populated: `project`, `workspace`, and `root`.",
@@ -664,7 +721,7 @@
           "additionalProperties": false,
           "patternProperties": {
             "^[A-Za-z_][A-Za-z0-9_]*$": {
-              "$ref": "#/$defs/HandlebarsTemplate"
+              "$ref": "#/definitions/HandlebarsTemplate"
             }
           },
           "examples": [
@@ -690,7 +747,7 @@
           "description": "Handlebars template for the proxied hostname, used by every service\nthat does not set its own.\n\nAvailable variables:\n- `root` (bool) — whether this is the root workspace\n- `project` — project name\n- `workspace` — workspace name\n- `service` — name of the service from compose",
           "anyOf": [
             {
-              "$ref": "#/$defs/HandlebarsTemplate"
+              "$ref": "#/definitions/HandlebarsTemplate"
             },
             {
               "type": "null"
@@ -702,7 +759,7 @@
           "description": "Configure proxy settings for each docker compose service.",
           "type": "object",
           "additionalProperties": {
-            "$ref": "#/$defs/ProxyService"
+            "$ref": "#/definitions/ProxyService"
           },
           "default": {}
         }
@@ -719,7 +776,7 @@
           "description": "Handlebars template for this service's hostname. Overrides the\nproject-level `hostname`.",
           "anyOf": [
             {
-              "$ref": "#/$defs/HandlebarsTemplate"
+              "$ref": "#/definitions/HandlebarsTemplate"
             },
             {
               "type": "null"

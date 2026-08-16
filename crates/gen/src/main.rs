@@ -49,7 +49,13 @@ fn schema_json(workspace_root: &Path) -> eyre::Result<String> {
     let toml_spec_version = toml_spec_version(&cargo_lock)?;
 
     let mut schema = devconcurrent::schema();
-    schema.ensure_object().insert(
+    let object = schema.ensure_object();
+    object.shift_insert(
+        1,
+        "$id".into(),
+        "https://devconcurrent.paholg.com/devconcurrent.schema.json".into(),
+    );
+    object.insert(
         "x-tombi-toml-version".into(),
         format!("v{toml_spec_version}").into(),
     );
@@ -70,7 +76,7 @@ fn config_markdown() -> eyre::Result<String> {
     let root = serde_json::to_value(devconcurrent::schema())?;
 
     let mut out = String::new();
-    walk_properties(&mut out, &root, &root["$defs"], 0);
+    walk_properties(&mut out, &root, &root["definitions"], 0);
 
     Ok(out)
 }
@@ -79,11 +85,11 @@ fn config_markdown() -> eyre::Result<String> {
 /// as config.toml (as `projects.<name>.devcontainer.customizations`).
 fn dc_options_markdown() -> eyre::Result<String> {
     let root = serde_json::to_value(devconcurrent::schema())?;
-    let node = &root["$defs"]["DcOptions"];
-    assert!(!node.is_null(), "no DcOptions in schema $defs");
+    let node = &root["definitions"]["DcOptions"];
+    assert!(!node.is_null(), "no DcOptions in schema definitions");
 
     let mut out = String::new();
-    walk_properties(&mut out, node, &root["$defs"], 0);
+    walk_properties(&mut out, node, &root["definitions"], 0);
 
     Ok(out)
 }
@@ -206,16 +212,25 @@ fn walk_properties(out: &mut String, node: &Value, defs: &Value, depth: usize) {
     }
 }
 
-/// Follow `$ref`s and `anyOf [X, null]` wrappers to the real schema, returning
-/// it along with the `$defs` name it came from, if any.
+/// Follow `$ref`s, single-element `allOf` wrappers (how draft-07 attaches
+/// keywords beside a `$ref`), and `anyOf [X, null]` wrappers to the real
+/// schema, returning it along with the `definitions` name it came from, if
+/// any.
 fn resolve<'a>(node: &'a Value, defs: &'a Value) -> (&'a Value, Option<&'a str>) {
     if let Some(name) = node
         .get("$ref")
         .and_then(Value::as_str)
-        .and_then(|r| r.strip_prefix("#/$defs/"))
+        .and_then(|r| r.strip_prefix("#/definitions/"))
         && let Some(def) = defs.get(name)
     {
         return (def, Some(name));
+    }
+    if let Some([only]) = node
+        .get("allOf")
+        .and_then(Value::as_array)
+        .map(Vec::as_slice)
+    {
+        return resolve(only, defs);
     }
     if let Some(any) = node.get("anyOf").and_then(Value::as_array) {
         let mut non_null = any

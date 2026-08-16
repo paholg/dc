@@ -170,7 +170,11 @@ async fn run_in_container(
     argv: &[&str],
 ) -> eyre::Result<Vec<u8>> {
     let mut command = tokio::process::Command::new("docker");
-    command.args(["exec", "-i"]);
+    command.arg("exec");
+    // No `-i`, and explicitly null stdin: tokio's `output()` leaves stdin inherited (unlike
+    // std's), and a probe that reads the terminal stops a backgrounded `dc x cmd &` with
+    // SIGTTIN before the real command ever runs.
+    command.stdin(std::process::Stdio::null());
     if let Some(u) = user {
         command.args(["-u", u]);
     }

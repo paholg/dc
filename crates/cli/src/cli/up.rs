@@ -185,6 +185,10 @@ impl Up {
                 &devcontainer.config.post_create_command,
             ),
             ("postStartCommand", &devcontainer.config.post_start_command),
+            (
+                "postAttachCommand",
+                &devcontainer.config.post_attach_command,
+            ),
         ] {
             let Some(cmd) = cmd else { continue };
             cmd.render(name, &context)?

@@ -64,6 +64,12 @@ impl Table {
         (out, lines)
     }
 
+    /// Render a final, static frame to a string — for callers that already have
+    /// all their data and just want the aligned output (no spinner, no
+    /// truncation, no cursor control).
+    pub(crate) fn rendered(&self) -> String {
+        self.render_block(0, true, u16::MAX).0
+    }
     /// Redraw in place until done (non-live) or Ctrl-C (live).
     pub(crate) async fn run_tty(self) -> eyre::Result<()> {
         Report::from(self).run_tty().await

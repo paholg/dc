@@ -18,6 +18,12 @@
         "port": 43770,
         "caRoot": null
       }
+    },
+    "shell": {
+      "$ref": "#/$defs/ShellGlobal",
+      "default": {
+        "exportEnv": false
+      }
     }
   },
   "x-tombi-toml-version": "v1.1.0",
@@ -351,7 +357,8 @@
                 "enable": false,
                 "hostname": null,
                 "services": {}
-              }
+              },
+              "env": {}
             }
           }
         }
@@ -612,7 +619,8 @@
               "enable": false,
               "hostname": null,
               "services": {}
-            }
+            },
+            "env": {}
           }
         }
       }
@@ -654,6 +662,17 @@
             "hostname": null,
             "services": {}
           }
+        },
+        "env": {
+          "description": "Shell variables describing the current workspace, rendered by\n`dc show env`.\n\nEach value is a Handlebars template. `{{hostname 'svc'}}` expands to the\nproxied hostname of compose service `svc`; `project`, `workspace` and\n`root` are available as plain variables. For example:\n\n```json\n\"env\": {\n  \"DATABASE_URL\": \"postgres://postgres:postgres@{{hostname 'postgres'}}:5432/db\"\n}\n```",
+          "type": "object",
+          "additionalProperties": false,
+          "patternProperties": {
+            "^[A-Za-z_][A-Za-z0-9_]*$": {
+              "$ref": "#/$defs/HandlebarsTemplate"
+            }
+          },
+          "default": {}
         }
       }
     },
@@ -670,7 +689,7 @@
           "description": "Handlebars template for the proxied hostname, used by every service\nthat does not set its own.\n\nAvailable variables:\n- `root` (bool) — whether this is the root workspace\n- `project` — project name\n- `workspace` — workspace name\n- `service` — name of the service from compose\n\nDefault: {{workspace}}.{{service}}.test",
           "anyOf": [
             {
-              "$ref": "#/$defs/ProxyHostnameTemplate"
+              "$ref": "#/$defs/HandlebarsTemplate"
             },
             {
               "type": "null"
@@ -688,8 +707,8 @@
         }
       }
     },
-    "ProxyHostnameTemplate": {
-      "description": "Handlebars template for the proxied hostname. Variables: `root` (bool), `project`, `workspace`, `service`.",
+    "HandlebarsTemplate": {
+      "description": "A Handlebars template. Hostname templates get `root` (bool), `project`, `workspace` and `service`; `env` templates get `root`, `project`, `workspace` and the `hostname` helper.",
       "type": "string"
     },
     "ProxyService": {
@@ -699,7 +718,7 @@
           "description": "Handlebars template for this service's hostname. Overrides the\nproject-level `hostname`; same variables are available.",
           "anyOf": [
             {
-              "$ref": "#/$defs/ProxyHostnameTemplate"
+              "$ref": "#/$defs/HandlebarsTemplate"
             },
             {
               "type": "null"
@@ -768,6 +787,17 @@
             "null"
           ],
           "default": null
+        }
+      }
+    },
+    "ShellGlobal": {
+      "description": "Global shell-integration settings, applied when you source\n`COMPLETE=<shell> devconcurrent`.",
+      "type": "object",
+      "properties": {
+        "exportEnv": {
+          "description": "Also register a prompt hook that keeps the variables from\n`customizations.devconcurrent.env` in sync with the workspace you are\nstanding in, as though you ran `dc show env --export` yourself.\n\nDefault: false",
+          "type": "boolean",
+          "default": false
         }
       }
     }

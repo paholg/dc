@@ -7,10 +7,10 @@ publish = false
 
 [dependencies]
 bon = "3.9.3"
-bytes = "1.11"
+bytes = "1.12"
 futures-util = "0.3"
 indexmap = { workspace = true }
-rand = { version = "0.10.1", optional = true }
+rand = { version = "0.10.2", optional = true }
 reqwest = { version = "0.13", default-features = false, features = [
   "json",
   "stream"

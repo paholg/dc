@@ -6,9 +6,9 @@ description = "Wire format types shared between the devconcurrent CLI and the de
 publish = false
 
 [dependencies]
-handlebars = "6.4.1"
+handlebars = "6.4.4"
 indexmap = { workspace = true }
-schemars = { version = "1.2.1", features = ["indexmap2", "preserve_order"] }
+schemars = { version = "1.2.2", features = ["indexmap2", "preserve_order"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = "0.11.0"

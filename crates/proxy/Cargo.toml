@@ -6,22 +6,22 @@ description = "DNS resolver for devconcurrent devcontainers"
 publish = false
 
 [dependencies]
-async-trait = "0.1.89"
+async-trait = "0.1.92"
 axum = "0.8.9"
 axum-reverse-proxy = { version = "1.3.0", default-features = false }
 docker = { path = "../docker", version = "0.0.0" }
-eyre = "0.6.12"
+eyre = "0.6.14"
 fqdn = "0.5.2"
 fqdn-trie = "0.5.0"
-futures-util = "0.3.32"
+futures-util = "0.3.34"
 hickory-proto = "0.26.1"
 hickory-server = "0.26.1"
-http = "1.4.2"
-hyper = { version = "1.10.1", features = ["http1", "server"] }
+http = "1.5.0"
+hyper = { version = "1.11.0", features = ["http1", "server"] }
 hyper-util = { version = "0.1.20", features = ["service", "tokio"] }
 indexmap.workspace = true
-rcgen = { version = "0.14.8", features = ["pem", "x509-parser"] }
-rustls = "0.23.40"
+rcgen = { version = "0.14.9", features = ["pem", "x509-parser"] }
+rustls = "0.23.43"
 serde_json.workspace = true
 shared = { path = "../shared" }
 tokio = { workspace = true, features = ["full"] }

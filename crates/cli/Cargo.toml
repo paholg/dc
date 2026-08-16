@@ -7,23 +7,23 @@ homepage = "https://github.com/paholg/devconcurrent"
 repository = "https://github.com/paholg/devconcurrent"
 
 [dependencies]
-clap = { version = "4.6.1", features = ["derive"] }
-clap_complete = { version = "4.6.5", features = ["unstable-dynamic"] }
+clap = { version = "4.6.6", features = ["derive"] }
+clap_complete = { version = "4.6.9", features = ["unstable-dynamic"] }
 color-eyre = "0.6.5"
 crossterm = "0.29"
 directories = "6.0.0"
 docker = { path = "../docker" }
-eyre = "0.6.12"
+eyre = "0.6.14"
 figment = { version = "0.10.19", features = ["json", "toml"] }
-futures = "0.3.32"
-gix = "0.84.0"
+futures = "0.3.34"
+gix = "0.86.0"
 indexmap = { workspace = true }
 indicatif = "0.18"
 itertools = "0.15.0"
 jiff = "0.2"
-num-bigint = "0.4.6"
+num-bigint = "0.5.1"
 owo-colors = "4.3.0"
-rand = "0.10.1"
+rand = "0.10.2"
 # The `ring` provider rather than the default `aws-lc-rs`: it builds without
 # cmake, which keeps the release builds of the CLI portable.
 rustls = { version = "0.23", default-features = false, features = [
@@ -33,12 +33,12 @@ rustls = { version = "0.23", default-features = false, features = [
   "tls12",
 ] }
 rustls-native-certs = "0.8"
-schemars = { version = "1.2.1", features = ["indexmap2", "preserve_order"] }
+schemars = { version = "1.2.2", features = ["indexmap2", "preserve_order"] }
 serde = { workspace = true }
-serde-inline-default = "1.0.1"
+serde-inline-default = "1.0.2"
 serde_json = { workspace = true, features = ["preserve_order"] }
 serde_path_to_error = "0.1.20"
-serde_with = { version = "3.21", features = ["schemars_1"] }
+serde_with = { version = "3.22", features = ["schemars_1"] }
 sha2 = "0.11.0"
 shared = { path = "../shared" }
 shellexpand = "3.1.2"
@@ -51,12 +51,12 @@ tokio-rustls = { version = "0.26", default-features = false, features = [
   "ring",
   "tls12",
 ] }
-toml = { version = "1.1.2", features = ["preserve_order"] }
+toml = { version = "1.1.4", features = ["preserve_order"] }
 tracing = { workspace = true }
 tracing-indicatif = "0.3"
 tracing-subscriber = { version = "0.3", features = ["registry"] }
 vec1 = { version = "1.12.1", features = ["serde"] }
-winnow = "1.0.3"
+winnow = "1.0.4"
 
 [dev-dependencies]
 tempfile = { workspace = true }

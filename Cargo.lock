@@ -911,6 +911,7 @@ dependencies = [
  "num-bigint 0.5.1",
  "owo-colors",
  "rand 0.10.2",
+ "rustix",
  "rustls",
  "rustls-native-certs",
  "schemars 1.2.2",

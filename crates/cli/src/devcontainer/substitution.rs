@@ -195,8 +195,8 @@ impl schemars::JsonSchema for Template {
                             Supported variables: `${localEnv:VAR[:default]}`, \
                             `${containerEnv:VAR[:default]}`, `${localWorkspaceFolder}`, \
                             `${containerWorkspaceFolder}`, `${localWorkspaceFolderBasename}`, \
-                            `${containerWorkspaceFolderBasename}`, `${devcontainerId}`. \
-                            See https://containers.dev/implementors/json_reference/#variables-in-devcontainerjson.",
+                            `${containerWorkspaceFolderBasename}`, `${devcontainerId}`.\
+                            \nhttps://containers.dev/implementors/json_reference/#variables-in-devcontainerjson",
         })
     }
 }

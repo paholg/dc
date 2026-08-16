@@ -146,11 +146,13 @@
           "default": null
         },
         "features": {
-          "description": "Features to add to the dev container.",
-          "default": null
+          "description": "Features to add to the dev container. Ignored by devconcurrent.",
+          "type": "object",
+          "additionalProperties": true,
+          "default": {}
         },
         "overrideFeatureInstallOrder": {
-          "description": "Array consisting of the Feature id (without the semantic version) of Features in the order\nthe user wants them to be installed.",
+          "description": "Array consisting of the Feature id (without the semantic version) of Features in the order\nthe user wants them to be installed. Ignored by devconcurrent.",
           "type": "array",
           "items": {
             "type": "string"
@@ -158,7 +160,10 @@
           "default": []
         },
         "secrets": {
-          "default": null
+          "description": "Recommended secrets for this dev container. Ignored by devconcurrent.",
+          "type": "object",
+          "additionalProperties": true,
+          "default": {}
         },
         "forwardPorts": {
           "type": "array",
@@ -175,7 +180,7 @@
           "default": {}
         },
         "otherPortsAttributes": {
-          "description": "Set default properties that are applied to all ports that don't get properties from the\nsetting `remote.portsAttributes`",
+          "description": "Set default properties that are applied to all ports that don't get properties from the\nsetting `remote.portsAttributes`. Ignored by devconcurrent.",
           "anyOf": [
             {
               "$ref": "#/definitions/PortAttributes"
@@ -593,10 +598,10 @@
       "type": "object",
       "properties": {
         "cpus": {
-          "description": "Number of required CPUs. Minimum 1.",
+          "description": "Number of required CPUs.",
           "type": "integer",
           "format": "uint64",
-          "minimum": 0,
+          "minimum": 1,
           "default": 1
         },
         "memory": {
@@ -605,14 +610,16 @@
             "string",
             "null"
           ],
+          "pattern": "^\\d+([tgmk]b)?$",
           "default": null
         },
         "storage": {
-          "description": "Amount of required RAM in bytes. Supports units tb, gb, mb and kb.",
+          "description": "Amount of required disk space in bytes. Supports units tb, gb, mb and kb.",
           "type": [
             "string",
             "null"
           ],
+          "pattern": "^\\d+([tgmk]b)?$",
           "default": null
         },
         "gpu": {
@@ -637,20 +644,21 @@
           "type": "object",
           "properties": {
             "cores": {
-              "description": "Number of cores. Minimum 1.",
+              "description": "Number of required cores.",
               "type": [
                 "integer",
                 "null"
               ],
               "format": "uint64",
-              "minimum": 0
+              "minimum": 1
             },
             "memory": {
               "description": "Amount of required RAM in bytes. Supports units tb, gb, mb and kb.",
               "type": [
                 "string",
                 "null"
-              ]
+              ],
+              "pattern": "^\\d+([tgmk]b)?$"
             }
           }
         }

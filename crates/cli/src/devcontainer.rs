@@ -98,19 +98,20 @@ pub(crate) struct DevcontainerConfig {
     pub(crate) schema: Option<String>,
     /// A name for the dev container which can be displayed to the user.
     pub(crate) name: Option<Template>,
-    /// Features to add to the dev container.
+    /// Features to add to the dev container. Ignored by devconcurrent.
     #[serde(deserialize_with = "unsupported::features::warn")]
-    pub(crate) features: serde_json::Value,
+    pub(crate) features: serde_json::Map<String, serde_json::Value>,
     /// Array consisting of the Feature id (without the semantic version) of Features in the order
-    /// the user wants them to be installed.
+    /// the user wants them to be installed. Ignored by devconcurrent.
     #[serde(deserialize_with = "unsupported::overrideFeatureInstallOrder::warn")]
     pub(crate) override_feature_install_order: Vec<String>,
+    /// Recommended secrets for this dev container. Ignored by devconcurrent.
     #[serde(deserialize_with = "unsupported::secrets::warn")]
-    pub(crate) secrets: serde_json::Value,
+    pub(crate) secrets: serde_json::Map<String, serde_json::Value>,
     pub(crate) forward_ports: Vec<ForwardPort>,
     pub(crate) ports_attributes: IndexMap<String, PortAttributes>,
     /// Set default properties that are applied to all ports that don't get properties from the
-    /// setting `remote.portsAttributes`
+    /// setting `remote.portsAttributes`. Ignored by devconcurrent.
     #[serde(deserialize_with = "unsupported::otherPortsAttributes::warn")]
     pub(crate) other_ports_attributes: Option<PortAttributes>,
     /// Controls whether on Linux the container's user should be updated with the local user's UID
@@ -370,12 +371,15 @@ impl MountFields {
 #[derive(Deserialize, Serialize, Clone, Debug, Default, JsonSchema)]
 #[serde(rename_all = "camelCase", default)]
 pub(crate) struct HostRequirements {
-    /// Number of required CPUs. Minimum 1.
+    /// Number of required CPUs.
     #[serde_inline_default(1)]
+    #[schemars(range(min = 1))]
     pub(crate) cpus: u64,
     /// Amount of required RAM in bytes. Supports units tb, gb, mb and kb.
+    #[schemars(regex(pattern = r"^\d+([tgmk]b)?$"))]
     pub(crate) memory: Option<String>,
-    /// Amount of required RAM in bytes. Supports units tb, gb, mb and kb.
+    /// Amount of required disk space in bytes. Supports units tb, gb, mb and kb.
+    #[schemars(regex(pattern = r"^\d+([tgmk]b)?$"))]
     pub(crate) storage: Option<String>,
     pub(crate) gpu: GpuRequirement,
 }
@@ -386,9 +390,11 @@ pub(crate) enum GpuRequirement {
     Bool(bool),
     String(GpuOptional),
     Object {
-        /// Number of cores. Minimum 1.
+        /// Number of required cores.
+        #[schemars(range(min = 1))]
         cores: Option<u64>,
         /// Amount of required RAM in bytes. Supports units tb, gb, mb and kb.
+        #[schemars(regex(pattern = r"^\d+([tgmk]b)?$"))]
         memory: Option<String>,
     },
 }

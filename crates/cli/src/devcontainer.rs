@@ -552,4 +552,61 @@ mod tests {
         let entry: MountEntry = serde_json::from_str(r#""type=bind,source=/host""#).unwrap();
         assert!(entry.to_compose_volume(&ctx()).is_err());
     }
+
+    /// Goes through the real key spelling, so a rename of `containerPort` can't
+    /// pass this silently.
+    fn config_with_container_port(port: serde_json::Value) -> DevcontainerConfig {
+        serde_json::from_value(serde_json::json!({
+            "customizations": {
+                "devconcurrent": {
+                    "proxy": {
+                        "enable": true,
+                        "services": {"app": {"containerPort": port}},
+                    },
+                },
+            },
+        }))
+        .expect("valid devcontainer config")
+    }
+
+    /// The proxy needs 80 and 443 for itself, and the failure if it doesn't get
+    /// them is a bind conflict inside a sidecar nobody is watching — so the
+    /// error has to name the service, the port, and the way out.
+    #[test]
+    fn container_port_80_or_443_is_rejected_by_name() {
+        for port in [shared::HTTP_PORT, shared::HTTPS_PORT] {
+            let Err(err) = config_with_container_port(port.into()).check_proxy_container_ports()
+            else {
+                panic!("port {port} should be rejected");
+            };
+            let err = err.to_string();
+
+            assert!(err.contains("\"app\""), "no service name in: {err}");
+            assert!(err.contains(&port.to_string()), "no port in: {err}");
+            assert!(err.contains("containerPort"), "no key name in: {err}");
+            assert!(
+                err.contains("listen on another port"),
+                "no remedy in: {err}",
+            );
+        }
+    }
+
+    #[test]
+    fn an_ordinary_container_port_is_accepted() {
+        assert!(
+            config_with_container_port(3000.into())
+                .check_proxy_container_ports()
+                .is_ok()
+        );
+    }
+
+    /// A DNS-only service has no port to collide with.
+    #[test]
+    fn a_service_without_a_container_port_is_accepted() {
+        assert!(
+            config_with_container_port(serde_json::Value::Null)
+                .check_proxy_container_ports()
+                .is_ok()
+        );
+    }
 }

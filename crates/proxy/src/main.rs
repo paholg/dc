@@ -49,7 +49,10 @@ async fn main() -> Result<()> {
                 Some(ca)
             }
             Err(e) => {
-                tracing::warn!(dir, "failed to load CA: {e:?}; services will be served over http only");
+                tracing::warn!(
+                    dir,
+                    "failed to load CA: {e:?}; services will be served over http only"
+                );
                 None
             }
         }

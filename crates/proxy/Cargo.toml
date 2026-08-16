@@ -17,6 +17,7 @@ futures-util = "0.3.34"
 hickory-proto = "0.26.1"
 hickory-server = "0.26.1"
 http = "1.5.0"
+httparse = "1.10.1"
 hyper = { version = "1.11.0", features = ["http1", "server"] }
 hyper-util = { version = "0.1.20", features = ["service", "tokio"] }
 indexmap.workspace = true

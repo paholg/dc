@@ -951,6 +951,7 @@ dependencies = [
  "hickory-proto",
  "hickory-server",
  "http",
+ "httparse",
  "hyper",
  "hyper-util",
  "indexmap 2.14.0",

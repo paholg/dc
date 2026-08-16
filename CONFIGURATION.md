@@ -11,7 +11,8 @@ We'll cover both here.
 
 This file is located in the config directory reported by the
 [`directories`](https://docs.rs/directories) crate, in `$XDG_CONFIG_HOME` or
-your platform's equivalent. See the
+your platform's equivalent, or in the directory named by the
+`DEVCONCURRENT_CONFIG` environment variable. See the
 [README](./README.md#configuration) for the full table.
 
 First, if you use [tombi](https://tombi-toml.github.io/tombi/), then it's

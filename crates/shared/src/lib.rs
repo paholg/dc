@@ -34,10 +34,10 @@ pub const SIDECAR_CERT_FILE: &str = "cert.pem";
 pub const SIDECAR_KEY_FILE: &str = "key.pem";
 
 // Environment variables read by the proxy on startup.
-pub const ENV_DNS_PORT: &str = "DC_PROXY_DNS_PORT";
+pub const ENV_DNS_PORT: &str = "DEVCONCURRENT_PROXY_DNS_PORT";
 /// Set by the CLI when a CAROOT bind-mount is present. The proxy loads
 /// `rootCA.pem` + `rootCA-key.pem` from this directory.
-pub const ENV_CA_DIR: &str = "DC_PROXY_CA_DIR";
+pub const ENV_CA_DIR: &str = "DEVCONCURRENT_PROXY_CA_DIR";
 
 /// Default Handlebars template for proxied hostnames.
 pub const DEFAULT_HOSTNAME_TEMPLATE: &str = "{{workspace}}.{{service}}.test";

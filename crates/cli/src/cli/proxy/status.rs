@@ -172,7 +172,6 @@ fn by_workspace(rows: Vec<Row>) -> Vec<Group> {
             .then_with(|| a.workspace.cmp(&b.workspace))
     });
     for group in &mut groups {
-        // Stable, so a service's ports stay in the order they're configured.
         group
             .rows
             .sort_by(|a, b| a.endpoint.service.cmp(&b.endpoint.service));
@@ -357,7 +356,7 @@ fn proxy_notes(source: &Gatherer<ProxyChecks>) -> impl Fn(u16) -> Vec<String> + 
     }
 }
 
-// -- one row per endpoint ----------------------------------------------------
+// -- one row per service -----------------------------------------------------
 
 fn spawn_row(probe: Arc<Probe>, endpoint: Arc<Endpoint>, live: bool) -> Gatherer<RowChecks> {
     Gatherer::progressive(move |mut out| async move {
@@ -407,10 +406,12 @@ fn endpoint_table(rows: &[Row], live: bool) -> Table {
         .build(rows, live)
 }
 
+/// The host ports are always the same pair, so the only thing worth a column
+/// is where they land.
 fn fmt_port(row: &Row) -> String {
-    match row.endpoint.port {
+    match row.endpoint.container_port {
         None => "-".to_string(),
-        Some(p) => format!("{}→{}", p.kind.host_port(), p.container),
+        Some(port) => port.to_string(),
     }
 }
 
@@ -419,14 +420,7 @@ fn fmt_port(row: &Row) -> String {
 fn notes(rows: &[Row]) -> impl Fn(u16) -> Vec<String> + use<> {
     let sources: Vec<(String, Gatherer<RowChecks>)> = rows
         .iter()
-        .map(|row| {
-            let port = fmt_port(row);
-            let label = match row.endpoint.port {
-                Some(_) => format!("{} {port}", row.endpoint.service),
-                None => row.endpoint.service.clone(),
-            };
-            (label, row.checks.clone())
-        })
+        .map(|row| (row.endpoint.service.clone(), row.checks.clone()))
         .collect();
 
     move |width| {
@@ -507,9 +501,7 @@ struct JsonEndpoint<'a> {
     workspace: &'a str,
     service: &'a str,
     hostname: Option<&'a str>,
-    host_port: Option<u16>,
     container_port: Option<u16>,
-    tls: bool,
     checks: &'a RowChecks,
 }
 
@@ -534,9 +526,7 @@ async fn emit_json(proxy: &Gatherer<ProxyChecks>, rows: &[Row]) -> Result<()> {
                 workspace: &row.endpoint.workspace,
                 service: &row.endpoint.service,
                 hostname: row.endpoint.hostname.as_deref(),
-                host_port: row.endpoint.port.map(|p| p.kind.host_port()),
-                container_port: row.endpoint.port.map(|p| p.container),
-                tls: row.endpoint.port.is_some_and(|p| p.kind.is_tls()),
+                container_port: row.endpoint.container_port,
                 checks,
             })
             .collect(),

@@ -1,4 +1,4 @@
-//! The per-endpoint checks, run as one pipeline that publishes each result the
+//! The per-service checks, run as one pipeline that publishes each result the
 //! moment it has it.
 //!
 //! The layers are checked separately on purpose: knowing that
@@ -20,13 +20,13 @@ use rustls::pki_types::pem::PemObject;
 use rustls::pki_types::{CertificateDer, ServerName};
 use rustls::{ClientConfig, RootCertStore};
 use serde::Serialize;
-use shared::{ENV_CA_DIR, PROXY_CONTAINER_NAME};
+use shared::{ENV_CA_DIR, HTTP_PORT, HTTPS_PORT, PROXY_CONTAINER_NAME};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio_rustls::TlsConnector;
 
 use super::ProxyChecks;
-use super::endpoints::{Endpoint, ProxyPort, Sidecar};
+use super::endpoints::{Endpoint, Sidecar};
 use crate::ansi::{GRAY, GREEN, RED, RESET};
 use crate::cli::proxy::{PROXY_IMAGE, dns};
 use crate::table::Datum;
@@ -38,11 +38,6 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(3);
 const HTTP_TIMEOUT: Duration = Duration::from_secs(3);
 
-/// How long to wait for the far end to hang up before calling a plain port
-/// healthy. The sidecar closes the connection as soon as its own upstream
-/// connect fails, so this only has to outlast a loopback connect.
-const HANGUP_WINDOW: Duration = Duration::from_millis(250);
-
 /// Longest a whole row is allowed to take, as a backstop against a stage that
 /// somehow outlives its own timeout.
 pub(super) const ROW_TIMEOUT: Duration = Duration::from_secs(20);
@@ -51,7 +46,7 @@ pub(super) const ROW_TIMEOUT: Duration = Duration::from_secs(20);
 #[serde(rename_all = "lowercase")]
 pub(super) enum Outcome {
     Ok,
-    /// Doesn't apply to this endpoint — a plain port has no TLS to check.
+    /// Doesn't apply to this service — a DNS-only one has nothing to connect to.
     Skip,
     Fail,
 }
@@ -131,7 +126,11 @@ impl fmt::Display for Check {
     }
 }
 
-/// Every check for one endpoint, in the order they're run and displayed.
+/// Every check for one service, in the order they're run and displayed.
+///
+/// `connect` and `tls` are the https path's prerequisites and `https` is the
+/// status it answered with; `http` asks the same service the same question
+/// over port 80.
 #[derive(Debug, Clone, Default, Serialize)]
 pub(super) struct RowChecks {
     pub(super) container: Datum<Check>,
@@ -140,7 +139,8 @@ pub(super) struct RowChecks {
     pub(super) resolver: Datum<Check>,
     pub(super) connect: Datum<Check>,
     pub(super) tls: Datum<Check>,
-    pub(super) app: Datum<Check>,
+    pub(super) https: Datum<Check>,
+    pub(super) http: Datum<Check>,
 }
 
 /// Reads one check out of a row; how a column or a note knows which stage it's
@@ -149,14 +149,15 @@ pub(super) type PickStage = fn(&RowChecks) -> &Datum<Check>;
 
 /// Every stage, in the order it runs and displays. The name is the column
 /// header, and — lowercased — how a note names the stage it came from.
-pub(super) const STAGES: [(&str, PickStage); 7] = [
+pub(super) const STAGES: [(&str, PickStage); 8] = [
     ("CONTAINER", |c| &c.container),
     ("SIDECAR", |c| &c.sidecar),
     ("DNS", |c| &c.dns),
     ("RESOLV", |c| &c.resolver),
     ("CONNECT", |c| &c.connect),
     ("TLS", |c| &c.tls),
-    ("APP", |c| &c.app),
+    ("HTTPS", |c| &c.https),
+    ("HTTP", |c| &c.http),
 ];
 
 impl RowChecks {
@@ -478,7 +479,7 @@ fn check_strays(strays: &[String]) -> Check {
     ))
 }
 
-/// Run every check for one endpoint, publishing after each.
+/// Run every check for one service, publishing after each.
 pub(super) async fn run(probe: &Probe, endpoint: &Endpoint, out: &mut Publisher<RowChecks>) {
     let Some((container_id, ip)) = check_container(endpoint, out) else {
         // Nothing else can be true if the container isn't.
@@ -499,34 +500,55 @@ pub(super) async fn run(probe: &Probe, endpoint: &Endpoint, out: &mut Publisher<
     let dns_ok = check_dns(probe, endpoint, &hostname, ip, out).await;
     check_resolver(&hostname, ip, dns_ok, probe.dns_port, out).await;
 
-    let Some(port) = endpoint.port else {
-        // DNS-only: there's no port to reach, and that's not a fault.
+    let Some(container_port) = endpoint.container_port else {
+        // DNS-only: there's nothing to reach, and that's not a fault.
         out.update(|c| {
             c.connect = Datum::Value(Check::skip_because("no containerPort is configured"));
             c.tls = Datum::Value(Check::skip());
-            c.app = Datum::Value(Check::skip());
+            c.https = Datum::Value(Check::skip());
+            c.http = Datum::Value(Check::skip());
         });
         return;
     };
 
-    let addr = SocketAddr::new(ip, port.kind.host_port());
-    let stream = match connect(addr, port, out).await {
-        Some(stream) => stream,
-        None => {
-            out.update(|c| {
-                c.tls = Datum::Value(Check::skip());
-                c.app = Datum::Value(Check::skip());
-            });
-            return;
-        }
-    };
+    // The two paths are reported independently: https can be broken while http
+    // is fine, and saying which is the point of checking both.
+    check_https(probe, &hostname, ip, container_port, out).await;
+    check_http(&hostname, ip, container_port, out).await;
+}
 
-    if port.kind.is_tls() {
-        check_tls_app(probe, &hostname, port, stream, out).await;
-    } else {
-        out.update(|c| c.tls = Datum::Value(Check::skip()));
-        check_plain_app(port, stream, out).await;
-    }
+/// The https path: connect to 443, prove the sidecar's cert, then prove the
+/// service behind it.
+async fn check_https(
+    probe: &Probe,
+    hostname: &str,
+    ip: IpAddr,
+    container_port: u16,
+    out: &mut Publisher<RowChecks>,
+) {
+    let addr = SocketAddr::new(ip, HTTPS_PORT);
+    let Some(stream) = connect(addr, |c| &mut c.connect, out).await else {
+        out.update(|c| {
+            c.tls = Datum::Value(Check::skip());
+            c.https = Datum::Value(Check::skip());
+        });
+        return;
+    };
+    check_https_app(probe, hostname, container_port, stream, out).await;
+}
+
+/// The http path: connect to 80 and read the status the service answers with.
+async fn check_http(
+    hostname: &str,
+    ip: IpAddr,
+    container_port: u16,
+    out: &mut Publisher<RowChecks>,
+) {
+    let addr = SocketAddr::new(ip, HTTP_PORT);
+    let Some(stream) = connect(addr, |c| &mut c.http, out).await else {
+        return;
+    };
+    check_http_app(hostname, container_port, stream, out).await;
 }
 
 /// Mark everything that wasn't reached, so no cell is left spinning.
@@ -538,7 +560,8 @@ fn skip_rest(out: &mut Publisher<RowChecks>, reason: Check) {
             &mut c.resolver,
             &mut c.connect,
             &mut c.tls,
-            &mut c.app,
+            &mut c.https,
+            &mut c.http,
         ] {
             if matches!(slot, Datum::Pending) {
                 *slot = Datum::Value(reason.clone());
@@ -699,9 +722,11 @@ async fn check_resolver(
     out.update(|c| c.resolver = Datum::Value(check));
 }
 
+/// `slot` says which cell the result lands in, since the https and http paths
+/// each report their own connect.
 async fn connect(
     addr: SocketAddr,
-    port: ProxyPort,
+    slot: fn(&mut RowChecks) -> &mut Datum<Check>,
     out: &mut Publisher<RowChecks>,
 ) -> Option<TcpStream> {
     let result = tokio::time::timeout(CONNECT_TIMEOUT, TcpStream::connect(addr)).await;
@@ -715,8 +740,8 @@ async fn connect(
         ),
         Ok(Err(e)) if e.kind() == std::io::ErrorKind::ConnectionRefused => (
             Check::fail(format!(
-                "nothing is listening on {addr} (port {} of the service)",
-                port.kind.host_port(),
+                "nothing is listening on {addr}; the sidecar isn't serving port {}",
+                addr.port(),
             )),
             None,
         ),
@@ -726,17 +751,17 @@ async fn connect(
         ),
         Ok(Ok(stream)) => (Check::ok(), Some(stream)),
     };
-    out.update(|c| c.connect = Datum::Value(check));
+    out.update(|c| *slot(c) = Datum::Value(check));
     stream
 }
 
 /// A TLS port is terminated by the sidecar, which then reverse-proxies HTTP to
 /// the container port — so the handshake proves the sidecar and its cert, and
 /// the response proves the app behind it.
-async fn check_tls_app(
+async fn check_https_app(
     probe: &Probe,
     hostname: &str,
-    port: ProxyPort,
+    container_port: u16,
     stream: TcpStream,
     out: &mut Publisher<RowChecks>,
 ) {
@@ -745,7 +770,7 @@ async fn check_tls_app(
             let why = why.clone();
             out.update(|c| {
                 c.tls = Datum::Value(Check::fail(why));
-                c.app = Datum::Value(Check::skip());
+                c.https = Datum::Value(Check::skip());
             });
             return;
         }
@@ -759,7 +784,7 @@ async fn check_tls_app(
                 c.tls = Datum::Value(Check::fail(format!(
                     "{hostname} is not a valid TLS name: {e}"
                 )));
-                c.app = Datum::Value(Check::skip());
+                c.https = Datum::Value(Check::skip());
             });
             return;
         }
@@ -775,7 +800,7 @@ async fn check_tls_app(
         Err(_) => {
             out.update(|c| {
                 c.tls = Datum::Value(Check::fail("the TLS handshake timed out"));
-                c.app = Datum::Value(Check::skip());
+                c.https = Datum::Value(Check::skip());
             });
             return;
         }
@@ -783,7 +808,7 @@ async fn check_tls_app(
             let why = describe_handshake_error(&e, hostname);
             out.update(|c| {
                 c.tls = Datum::Value(Check::fail(why));
-                c.app = Datum::Value(Check::skip());
+                c.https = Datum::Value(Check::skip());
             });
             return;
         }
@@ -799,34 +824,33 @@ async fn check_tls_app(
         // on the container port, so it's the app that's missing, not the proxy.
         Ok(status @ (502 | 504)) => Check::fail(format!(
             "the proxy answered {status}: nothing is serving on container port {}",
-            port.container,
+            container_port,
         )),
         Ok(status) => Check::ok_with(status.to_string()),
     };
-    out.update(|c| c.app = Datum::Value(check));
+    out.update(|c| c.https = Datum::Value(check));
 }
 
-/// The http port is a byte splice, so there's no protocol to speak. The
-/// sidecar hangs up immediately when its own upstream connect fails, which is
-/// the signal we look for.
-async fn check_plain_app(port: ProxyPort, mut stream: TcpStream, out: &mut Publisher<RowChecks>) {
-    let mut buf = [0u8; 1];
-    let check = match tokio::time::timeout(HANGUP_WINDOW, stream.read(&mut buf)).await {
-        // Still open: the sidecar spliced us through to something.
-        Err(_) => Check::ok(),
-        // The far end spoke first, so there is definitely something there.
-        Ok(Ok(1..)) => Check::ok(),
-        Ok(Ok(_)) => Check::fail(format!(
-            "the sidecar accepted the connection then closed it: nothing is listening on \
-             container port {}",
-            port.container,
+/// Port 80 reaches the same service the https path does, so ask it the same
+/// question and report the same thing: the status it answered with.
+async fn check_http_app(
+    hostname: &str,
+    container_port: u16,
+    mut stream: TcpStream,
+    out: &mut Publisher<RowChecks>,
+) {
+    let check = match http_status(&mut stream, hostname).await {
+        // Port 80 is a byte splice rather than a reverse proxy, so a container
+        // port with nothing on it shows up as the sidecar hanging up mid-request
+        // rather than as a gateway status.
+        Err(e) => Check::fail(format!(
+            "no HTTP response on port {HTTP_PORT}: {e}; check that container port \
+             {container_port} is serving"
         )),
-        Ok(Err(e)) => Check::fail(format!(
-            "the connection to container port {} dropped: {e}",
-            port.container,
-        )),
+        Ok(status) => Check::ok_with(status.to_string()),
     };
-    out.update(|c| c.app = Datum::Value(check));
+    // Overwrites this path's own connect result; the https path owns `app`.
+    out.update(|c| c.http = Datum::Value(check));
 }
 
 /// rustls' errors are precise but not friendly; the two that actually happen in
@@ -907,24 +931,20 @@ fn join(addrs: &[IpAddr]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cli::proxy::status::endpoints::{ExpectedSidecar, ProxyKind, Target};
+    use crate::cli::proxy::status::endpoints::{ExpectedSidecar, Target};
 
-    /// The https endpoint for `feature/app`, whose service expects a sidecar.
+    /// `feature/app`, a served service that expects a sidecar.
     fn endpoint() -> Endpoint {
-        let port = ProxyPort {
-            kind: ProxyKind::Https,
-            container: 8080,
-        };
         let plan = shared::SidecarPlan {
             hostname: "feature.app.test".to_string(),
-            port: port.container,
+            port: 8080,
         };
         Endpoint {
             project: "proj".to_string(),
             workspace: "feature".to_string(),
             service: "app".to_string(),
             hostname: Some(plan.hostname.clone()),
-            port: Some(port),
+            container_port: Some(plan.port),
             container: Some(Target {
                 id: "target-cid".to_string(),
                 status: ContainerStatus::Running,
@@ -1029,7 +1049,7 @@ mod tests {
     #[test]
     fn a_service_with_no_container_port_needs_no_sidecar() {
         let mut endpoint = endpoint();
-        endpoint.port = None;
+        endpoint.container_port = None;
         assert_eq!(
             check_sidecar(&probe(Vec::new()), &endpoint, "target-cid").outcome,
             Outcome::Skip,
@@ -1160,7 +1180,8 @@ mod tests {
             &mut row.resolver,
             &mut row.connect,
             &mut row.tls,
-            &mut row.app,
+            &mut row.https,
+            &mut row.http,
         ] {
             *slot = Datum::Value(Check::ok());
         }
@@ -1171,7 +1192,7 @@ mod tests {
 
     #[test]
     fn skipped_checks_are_not_failures() {
-        let row = checks(Check::ok(), Check::skip_because("no ports"));
+        let row = checks(Check::ok(), Check::skip_because("no containerPort"));
         assert!(!row.failed());
     }
 

@@ -2,8 +2,16 @@ check: lint test
 
 fix: _fix check
 
-run *args: 
+run *args:
     cargo run --bin devconcurrent -- {{args}}
+
+# Build the book.
+docs:
+    mdbook build docs
+
+# Serve the book locally, rebuilding on change.
+docs-serve:
+    mdbook serve docs --open
 
 # Build the proxy image, tag it, then run it.
 proxy-up:

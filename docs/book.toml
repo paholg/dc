@@ -1,0 +1,11 @@
+[book]
+title = "devconcurrent"
+description = "Development environments made easy: git worktrees plus devcontainers, with DNS and a TLS-terminating proxy."
+authors = ["Paho Lurie-Gregg"]
+language = "en"
+src = "src"
+
+[output.html]
+site-url = "/"
+git-repository-url = "https://github.com/paholg/devconcurrent"
+edit-url-template = "https://github.com/paholg/devconcurrent/edit/main/docs/{path}"

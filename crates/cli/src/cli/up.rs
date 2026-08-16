@@ -14,6 +14,7 @@ use crate::docker::compose::{compose_cmd, compose_ps_q};
 use crate::docker::probe;
 use crate::run::Runner;
 use crate::run::cmd::NamedCmd;
+use crate::workspace::Workspace;
 use crate::worktree;
 
 /// Bring up a workspace, creating it if it does not exist
@@ -48,7 +49,7 @@ impl Up {
     pub(crate) async fn run(self, project: Option<String>) -> eyre::Result<()> {
         let config = Config::load()?;
         let state = State::new(project, &config).await?;
-        let workspace = state.resolve_workspace(self.workspace).await?;
+        let workspace = state.resolve_workspace(self.workspace.clone()).await?;
 
         // Set up span.
         let name = &workspace.name;
@@ -77,10 +78,23 @@ impl Up {
             worktree::create(&workspace, self.detach, self.branch.as_deref()).await?;
         }
 
-        if !state.has_devcontainer() {
-            // If there's no devcontainer, then the only thing to do is create the worktree.
-            return Ok(());
+        if state.has_devcontainer() {
+            self.up_devcontainer(&config, &state, &workspace).await?;
         }
+
+        if self.go {
+            go::go(&workspace.path)?;
+        }
+
+        Ok(())
+    }
+
+    async fn up_devcontainer(
+        &self,
+        config: &Config,
+        state: &State<'_>,
+        workspace: &Workspace<'_>,
+    ) -> eyre::Result<()> {
         let devcontainer = state.devcontainer_for(&workspace.path)?;
         let devcontainer = &devcontainer;
 
@@ -98,12 +112,11 @@ impl Up {
         // events.
         if devcontainer.proxy_enabled() {
             let project = workspace.state.project_name.clone();
-            let proxy =
-                proxy::ProxyState::from_workspace(&config, project, Some(&workspace)).await?;
+            let proxy = proxy::ProxyState::from_workspace(config, project, Some(workspace)).await?;
             proxy::ensure_up(proxy).await?;
         }
 
-        let mut compose_up_cmd = compose_cmd(devcontainer, &workspace)?;
+        let mut compose_up_cmd = compose_cmd(devcontainer, workspace)?;
         compose_up_cmd.args(["up", "-d", "--build", "--remove-orphans"]);
 
         if let Some(ref services) = devcontainer.config.run_services {
@@ -123,7 +136,7 @@ impl Up {
         };
         Runner::run(cmd).await?;
 
-        let container_id = compose_ps_q(devcontainer, &workspace).await?;
+        let container_id = compose_ps_q(devcontainer, workspace).await?;
         let workdir = Some(devcontainer.workspace_folder.as_path());
 
         let container =
@@ -181,11 +194,11 @@ impl Up {
 
         // Port forward if requested
         if self.forward {
-            forward(devcontainer, &workspace).await?;
+            forward(devcontainer, workspace).await?;
         }
 
         // Interactive exec if requested
-        if let Some(cmd_args) = self.exec {
+        if let Some(cmd_args) = &self.exec {
             let default_exec = devcontainer
                 .devconcurrent()
                 .default_exec
@@ -196,14 +209,10 @@ impl Up {
                 &container_id,
                 devcontainer,
                 remote_env,
-                &cmd_args,
+                cmd_args,
                 user,
                 default_exec.as_ref(),
             )?;
-        }
-
-        if self.go {
-            go::go(&workspace.path)?;
         }
 
         Ok(())

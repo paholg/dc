@@ -6,6 +6,7 @@ use docker::{PROJECT_LABEL, WORKSPACE_LABEL};
 use eyre::eyre;
 
 use crate::ansi::{RED, RESET, YELLOW};
+use crate::cli::go::go;
 use crate::cli::{State, confirm, safety_check};
 use crate::complete::complete_workspace;
 use crate::config::Config;
@@ -62,13 +63,26 @@ impl Destroy {
             }
         }
 
+        // Grab this before the worktree goes away; once it's removed, the cwd
+        // no longer resolves.
+        let cwd = std::env::current_dir().ok();
+
         let cleanup = Cleanup {
             devcontainer: devcontainer.as_ref(),
             workspace: &workspace,
             force: self.force,
         };
 
-        Runner::run(cleanup).await
+        Runner::run(cleanup).await?;
+
+        // We just deleted the directory the shell is sitting in, so move to the
+        // project root. Destroying the root leaves its directory in place, so
+        // there's nowhere to go.
+        if !workspace.is_root && cwd.is_some_and(|cwd| cwd.starts_with(&workspace.path)) {
+            go(&state.project.path)?;
+        }
+
+        Ok(())
     }
 }
 

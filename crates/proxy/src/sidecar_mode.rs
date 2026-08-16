@@ -10,13 +10,16 @@
 //! Port 80 redirects browser navigations to https and byte-splices everything
 //! else through to the container port. Port 443 runs a hyper HTTP/1.1 server on
 //! the decrypted stream and routes into `axum-reverse-proxy` for the upstream
-//! side. A small tower layer adds the `X-Forwarded-Proto`
-//! and `X-Forwarded-Host` headers Rails needs to reconstruct `https://…`
-//! URLs. `X-Forwarded-For` is deliberately not added — the apparent client
-//! inside the netns is the docker bridge gateway, and forwarding that to
-//! the app would defeat dev tools (web-console, `ActionCable` origin checks,
-//! etc.) that gate on "is this localhost". The app sees the socket peer,
-//! which is 127.0.0.1 from rpxy connecting over loopback.
+//! side. Small tower layers add the `X-Forwarded-Proto` and `X-Forwarded-Host`
+//! headers Rails needs to reconstruct `https://…` URLs, and an
+//! `upgrade-insecure-requests` CSP so that `http://` URLs the app emits get
+//! fetched over https rather than blocked as mixed content.
+//!
+//! `X-Forwarded-For` is deliberately not added — the apparent client inside
+//! the netns is the docker bridge gateway, and forwarding that to the app
+//! would defeat dev tools (web-console, `ActionCable` origin checks, etc.)
+//! that gate on "is this localhost". The app sees the socket peer, which is
+//! 127.0.0.1 from rpxy connecting over loopback.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -38,7 +41,7 @@ use shared::{
 use tokio::io::{AsyncWriteExt, copy_bidirectional};
 use tokio::net::{TcpListener, TcpStream};
 use tokio_rustls::TlsAcceptor;
-use tower_http::set_header::SetRequestHeaderLayer;
+use tower_http::set_header::{SetRequestHeaderLayer, SetResponseHeaderLayer};
 use tracing::info;
 
 /// Entry point for sidecar mode.
@@ -281,7 +284,7 @@ async fn send_redirect(stream: &mut TcpStream, location: &str) {
     let _ = stream.shutdown().await;
 }
 
-/// Build the reverse-proxy router. Layers added:
+/// Build the reverse-proxy router. Request layers added:
 /// - `X-Forwarded-Proto: https` — always.
 /// - `X-Forwarded-Host: <inbound Host>` — preserves the user-facing hostname
 ///   so the app can reconstruct correct absolute URLs and redirects.
@@ -291,6 +294,12 @@ async fn send_redirect(stream: &mut TcpStream, location: &str) {
 /// the header absent, the app falls back to the socket peer (127.0.0.1
 /// from our loopback upstream connect), making the request look like it
 /// originated on the same machine.
+///
+/// One response layer: `Content-Security-Policy: upgrade-insecure-requests`,
+/// which rewrites any `http://` asset or link the app emits into `https://`
+/// before the browser requests it. The port-80 redirect can't help there —
+/// browsers block mixed active content on an https page without ever making
+/// the request — so an app with hardcoded `http://` URLs needs this instead.
 fn build_router(container: u16) -> Router {
     let upstream = format!("http://127.0.0.1:{container}");
     let proxy = ReverseProxy::new("/", &upstream);
@@ -303,6 +312,12 @@ fn build_router(container: u16) -> Router {
         .layer(SetRequestHeaderLayer::overriding(
             HeaderName::from_static("x-forwarded-host"),
             |req: &http::Request<_>| req.headers().get(HOST).cloned(),
+        ))
+        // Appending rather than overriding: an app that sets its own CSP keeps
+        // it, and the browser enforces both.
+        .layer(SetResponseHeaderLayer::appending(
+            HeaderName::from_static("content-security-policy"),
+            http::HeaderValue::from_static("upgrade-insecure-requests"),
         ))
 }
 
@@ -322,6 +337,25 @@ mod tests {
         "Sec-Fetch-Mode: navigate",
         "Accept: text/html",
     ];
+
+    /// `dc proxy status` reports the http column by sending this exact head
+    /// and asserting it gets a 307 (`check_http_app` in the CLI). The two live
+    /// in different crates, so this pins our half of that agreement.
+    #[test]
+    fn redirects_the_request_proxy_status_probes_with() {
+        let probe = [
+            "GET / HTTP/1.1",
+            "Host: app.proj.test",
+            "User-Agent: devconcurrent",
+            "Accept: text/html",
+            "Sec-Fetch-Mode: navigate",
+            "Connection: close",
+        ];
+        assert_eq!(
+            redirect_target_for(&head(&probe)).as_deref(),
+            Some("https://app.proj.test/"),
+        );
+    }
 
     #[test]
     fn redirects_a_browser_navigation_keeping_the_path_and_query() {
@@ -414,6 +448,81 @@ mod tests {
             ("a request with an empty Host", &empty_host),
         ] {
             assert_eq!(redirect_target_for(bytes), None, "{what}");
+        }
+    }
+
+    /// The https router, driven against a stub upstream. These headers only
+    /// ever show up in a browser, so nothing else would notice them going
+    /// missing.
+    mod router {
+        use super::*;
+        use tokio::io::AsyncReadExt;
+        use tower::ServiceExt;
+
+        /// An upstream that answers 200 and reports back what it was asked.
+        async fn stub_upstream() -> (u16, tokio::sync::oneshot::Receiver<Vec<u8>>) {
+            let listener = bind(0).await.expect("bind a stub upstream");
+            let port = listener.local_addr().expect("local addr").port();
+            let (tx, rx) = tokio::sync::oneshot::channel();
+
+            tokio::spawn(async move {
+                let (mut conn, _) = listener.accept().await.expect("accept");
+                let mut request = vec![0u8; 1024];
+                let n = conn.read(&mut request).await.expect("read the request");
+                request.truncate(n);
+                conn.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n")
+                    .await
+                    .expect("write the response");
+                let _ = tx.send(request);
+            });
+
+            (port, rx)
+        }
+
+        async fn get() -> (http::Response<axum::body::Body>, Vec<u8>) {
+            let (port, upstream) = stub_upstream().await;
+            let request = http::Request::builder()
+                .uri("/")
+                .header(HOST, "app.proj.test")
+                .body(axum::body::Body::empty())
+                .expect("build the request");
+
+            let response = build_router(port)
+                .oneshot(request)
+                .await
+                .expect("the router answers");
+            let seen = upstream.await.expect("the upstream was asked");
+            (response, seen)
+        }
+
+        /// An app that emits `http://` asset URLs would otherwise have them
+        /// blocked as mixed content on an https page.
+        #[tokio::test]
+        async fn responses_carry_the_upgrade_insecure_requests_policy() {
+            let (response, _) = get().await;
+            assert_eq!(
+                response
+                    .headers()
+                    .get("content-security-policy")
+                    .and_then(|v| v.to_str().ok()),
+                Some("upgrade-insecure-requests"),
+            );
+        }
+
+        /// The app is reached over loopback http, so these are the only way it
+        /// can tell it's being served as https.
+        #[tokio::test]
+        async fn the_upstream_is_told_the_request_arrived_over_https() {
+            let (_, seen) = get().await;
+            let seen = String::from_utf8_lossy(&seen).to_lowercase();
+            assert!(
+                seen.contains("x-forwarded-proto: https"),
+                "no forwarded proto in: {seen}"
+            );
+            assert!(
+                seen.contains("x-forwarded-host: app.proj.test"),
+                "no forwarded host in: {seen}"
+            );
         }
     }
 

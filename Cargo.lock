@@ -961,6 +961,7 @@ dependencies = [
  "shared",
  "tokio",
  "tokio-rustls",
+ "tower",
  "tower-http 0.7.0",
  "tracing",
  "tracing-subscriber",

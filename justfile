@@ -5,6 +5,16 @@ fix: _fix check
 run *args:
     cargo run --bin devconcurrent -- {{args}}
 
+# Regenerate everything derived from the code: the config JSON schema and the
+# book's generated reference pages. CI fails if these are stale.
+gen:
+    cargo run -q --bin devconcurrent -- gen-docs schema \
+        > devconcurrent.schema.json
+    cargo run -q --bin devconcurrent -- gen-docs cli \
+        > docs/src/reference/generated/cli.md
+    cargo run -q --bin devconcurrent -- gen-docs config \
+        > docs/src/reference/generated/config-toml.md
+
 # Build the book.
 docs:
     mdbook build docs

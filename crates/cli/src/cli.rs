@@ -9,6 +9,7 @@ mod compose;
 mod destroy;
 mod exec;
 pub(crate) mod fwd;
+mod gen_docs;
 mod go;
 pub(crate) mod proxy;
 mod show;
@@ -51,6 +52,8 @@ pub(crate) enum Commands {
     #[command()]
     Go(go::Go),
     Proxy(proxy::Proxy),
+    #[command(hide = true)]
+    GenDocs(gen_docs::GenDocs),
 }
 
 /// Check that the workspace is safe to tear down (clean git).
@@ -89,6 +92,7 @@ impl Cli {
             Commands::Destroy(destroy) => destroy.run(self.project).await,
             Commands::Go(go) => go.run(self.project).await,
             Commands::Proxy(proxy) => proxy.run(self.project).await,
+            Commands::GenDocs(gen_docs) => gen_docs.run(),
         }
     }
 }

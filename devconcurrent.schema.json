@@ -4,6 +4,7 @@
   "type": "object",
   "properties": {
     "projects": {
+      "description": "Your projects, keyed by name. Names may contain letters, numbers, `-`,\nand `_`.",
       "type": "object",
       "additionalProperties": false,
       "patternProperties": {
@@ -13,6 +14,7 @@
       }
     },
     "proxy": {
+      "description": "Global proxy settings.",
       "$ref": "#/$defs/ProxyGlobal",
       "default": {
         "port": 43770,
@@ -20,6 +22,7 @@
       }
     },
     "shell": {
+      "description": "Shell-integration settings.",
       "$ref": "#/$defs/ShellGlobal",
       "default": {
         "exportEnv": false
@@ -29,12 +32,15 @@
   "x-tombi-toml-version": "v1.1.0",
   "$defs": {
     "Project": {
+      "description": "A devconcurrent-enabled git repository.",
       "type": "object",
       "properties": {
         "path": {
+          "description": "The location of the git repository.",
           "type": "string"
         },
         "worktreeFolder": {
+          "description": "The directory where devconcurrent will place worktrees. Defaults to the\nplatform data directory: `$XDG_DATA_HOME/devconcurrent` on Linux,\n`~/Library/Application Support/devconcurrent` on macOS.",
           "type": [
             "string",
             "null"
@@ -42,6 +48,7 @@
           "default": null
         },
         "devcontainer": {
+          "description": "Any of the options from `devcontainer.json`\n(<https://containers.dev/implementors/json_reference/>), as per-user\noverrides. These are merged with the project's `devcontainer.json`,\nwith arrays being merged and settings from this file otherwise taking\nprecedence.",
           "anyOf": [
             {
               "$ref": "#/$defs/DevcontainerConfig"
@@ -773,7 +780,7 @@
       "type": "object",
       "properties": {
         "port": {
-          "description": "The DNS port the proxy listens on.\n\nDefault: 43770",
+          "description": "The DNS port the proxy listens on.",
           "type": "integer",
           "format": "uint16",
           "minimum": 0,
@@ -795,7 +802,7 @@
       "type": "object",
       "properties": {
         "exportEnv": {
-          "description": "Also register a prompt hook that keeps the variables from\n`customizations.devconcurrent.env` in sync with the workspace you are\nstanding in, as though you ran `dc show env --export` yourself.\n\nDefault: false",
+          "description": "Also register a prompt hook that keeps the variables from\n`customizations.devconcurrent.env` in sync with the workspace you are\nstanding in, as though you ran `dc show env --export` yourself.",
           "type": "boolean",
           "default": false
         }

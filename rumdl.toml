@@ -1,5 +1,11 @@
 [global]
 flavor = "gfm"
+exclude = [
+  # Machine-generated; regenerate with `just gen`.
+  "docs/src/reference/generated",
+  # mdbook part titles are top-level headings by design (MD025).
+  "docs/src/SUMMARY.md",
+]
 
 [MD013]
 code_blocks = false

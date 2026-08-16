@@ -60,10 +60,14 @@ impl<'de> Deserialize<'de> for ProjectName {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub(crate) struct Config {
+    /// Your projects, keyed by name. Names may contain letters, numbers, `-`,
+    /// and `_`.
     #[serde(default)]
     pub(crate) projects: IndexMap<ProjectName, Project>,
+    /// Global proxy settings.
     #[serde(default)]
     pub(crate) proxy: ProxyGlobal,
+    /// Shell-integration settings.
     #[serde(default)]
     pub(crate) shell: ShellGlobal,
 }
@@ -76,8 +80,6 @@ pub(crate) struct ShellGlobal {
     /// Also register a prompt hook that keeps the variables from
     /// `customizations.devconcurrent.env` in sync with the workspace you are
     /// standing in, as though you ran `dc show env --export` yourself.
-    ///
-    /// Default: false
     pub(crate) export_env: bool,
 }
 
@@ -86,8 +88,6 @@ pub(crate) struct ShellGlobal {
 #[serde(rename_all = "camelCase", default)]
 pub(crate) struct ProxyGlobal {
     /// The DNS port the proxy listens on.
-    ///
-    /// Default: 43770
     pub(crate) port: u16,
     /// Path to mkcert's CAROOT directory on the host. Required for `tls: true`
     /// port mappings; leave unset to disable TLS termination. Find it with
@@ -105,13 +105,23 @@ impl Default for ProxyGlobal {
     }
 }
 
+/// A devconcurrent-enabled git repository.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct Project {
+    /// The location of the git repository.
     #[serde(deserialize_with = "deserialize_shell_path")]
     pub(crate) path: PathBuf,
+    /// The directory where devconcurrent will place worktrees. Defaults to the
+    /// platform data directory: `$XDG_DATA_HOME/devconcurrent` on Linux,
+    /// `~/Library/Application Support/devconcurrent` on macOS.
     #[serde(default, deserialize_with = "deserialize_shell_path_opt")]
     pub(crate) worktree_folder: Option<PathBuf>,
+    /// Any of the options from `devcontainer.json`
+    /// (<https://containers.dev/implementors/json_reference/>), as per-user
+    /// overrides. These are merged with the project's `devcontainer.json`,
+    /// with arrays being merged and settings from this file otherwise taking
+    /// precedence.
     // We'll parse this properly when merging with Figment.
     #[schemars(with = "Option<DevcontainerConfig>")]
     pub(crate) devcontainer: Option<toml::Value>,

@@ -33,6 +33,7 @@ jobs:
       - docker-crate
       - docker-image
       - docs
+      - generated
     steps:
       - name: Check if all jobs succeeded
         uses: re-actors/alls-green@release/v1
@@ -116,6 +117,22 @@ jobs:
           primary-key: nix-${{ runner.os }}-image-${{ hashFiles('flake.lock', '**/Cargo.lock') }}
           restore-prefixes-first-match: nix-${{ runner.os }}-image-
       - run: nix build .#docker-service-image --print-build-logs
+
+  generated:
+    name: Generated files fresh
+    if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: extractions/setup-just@v4
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+      - run: just gen
+      - name: Check for stale generated files
+        run: |
+          git diff --exit-code
 
   docs:
     name: Build book

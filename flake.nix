@@ -85,7 +85,11 @@
             # `book` is mdbook's local build output; keep it out of the hash.
             filter = path: type: !(type == "directory" && baseNameOf path == "book");
           };
-          nativeBuildInputs = [ pkgs.mdbook ];
+          nativeBuildInputs = [
+            pkgs.mdbook
+            # Provides mdbook-tabs.
+            pkgs.mdbook-plugins
+          ];
           buildPhase = "mdbook build --dest-dir $out";
           dontInstall = true;
         };
@@ -147,6 +151,8 @@
               fd
               just
               mdbook
+              # Provides mdbook-tabs.
+              mdbook-plugins
               nodejs
               pandoc
               rumdl

@@ -63,7 +63,9 @@ impl<'de> Deserialize<'de> for ProjectName {
     }
 }
 
+/// Per-user configuration for devconcurrent.
 #[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(title = "devconcurrent config")]
 pub(crate) struct Config {
     /// Configured projects by name.
     #[serde(default)]

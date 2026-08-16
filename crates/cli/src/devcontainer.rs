@@ -77,12 +77,14 @@ pub(crate) struct DevcontainerConfig {
     pub(crate) docker_compose_file: Vec<Template>,
     /// The service you want to work on. This is considered the primary container for your dev
     /// environment which your editor will connect to.
+    #[serde(skip_serializing_if = "String::is_empty")]
     pub(crate) service: String,
     /// An array of services that should be started and stopped.
     #[serde(default)]
     pub(crate) run_services: Option<Vec<String>>,
     /// The path of the workspace folder inside the container. This is typically the target path of
     /// a volume mount in the docker-compose.yml.
+    #[serde(skip_serializing_if = "Template::is_empty")]
     pub(crate) workspace_folder: Template,
     /// Action to take when the user disconnects from the primary container in their editor. The
     /// default is to stop all of the compose containers.
@@ -106,13 +108,12 @@ pub(crate) struct DevcontainerConfig {
     #[serde(deserialize_with = "unsupported::overrideFeatureInstallOrder::warn")]
     pub(crate) override_feature_install_order: Vec<String>,
     /// Recommended secrets for this dev container. Ignored by devconcurrent.
-    #[serde(deserialize_with = "unsupported::secrets::warn")]
     pub(crate) secrets: serde_json::Map<String, serde_json::Value>,
+    /// Ports that can be forwarded from the host to the container.
     pub(crate) forward_ports: Vec<ForwardPort>,
+    /// Settings to apply to forwardPorts. Ignored by devconcurrent.
     pub(crate) ports_attributes: IndexMap<String, PortAttributes>,
-    /// Set default properties that are applied to all ports that don't get properties from the
-    /// setting `remote.portsAttributes`. Ignored by devconcurrent.
-    #[serde(deserialize_with = "unsupported::otherPortsAttributes::warn")]
+    /// Default settings for forwardPorts. Ignored by devconcurrent.
     pub(crate) other_ports_attributes: Option<PortAttributes>,
     /// Controls whether on Linux the container's user should be updated with the local user's UID
     /// and GID. On by default when opening from a local folder.
@@ -121,6 +122,7 @@ pub(crate) struct DevcontainerConfig {
     pub(crate) container_env: IndexMap<String, Template>,
     /// The user the container will be started with. The default is the user on the Docker image.
     pub(crate) container_user: Option<Template>,
+    /// Mounts to setup on container create.
     pub(crate) mounts: Vec<MountEntry>,
     /// Passes the --init flag when creating the dev container.
     pub(crate) init: Option<bool>,

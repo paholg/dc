@@ -31,9 +31,4 @@ macro_rules! unsupported {
     };
 }
 
-unsupported!(
-    features,
-    overrideFeatureInstallOrder,
-    secrets,
-    otherPortsAttributes,
-);
+unsupported!(features, overrideFeatureInstallOrder,);

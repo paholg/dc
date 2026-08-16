@@ -1,7 +1,8 @@
 {
   "$id": "https://devconcurrent.paholg.com/devconcurrent.schema.json",
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "Config",
+  "title": "devconcurrent config",
+  "description": "Per-user configuration for devconcurrent.",
   "type": "object",
   "properties": {
     "projects": {
@@ -88,8 +89,7 @@
         },
         "service": {
           "description": "The service you want to work on. This is considered the primary container for your dev\nenvironment which your editor will connect to.",
-          "type": "string",
-          "default": ""
+          "type": "string"
         },
         "runServices": {
           "description": "An array of services that should be started and stopped.",
@@ -104,7 +104,6 @@
         },
         "workspaceFolder": {
           "description": "The path of the workspace folder inside the container. This is typically the target path of\na volume mount in the docker-compose.yml.",
-          "default": "",
           "allOf": [
             {
               "$ref": "#/definitions/Template"
@@ -166,6 +165,7 @@
           "default": {}
         },
         "forwardPorts": {
+          "description": "Ports that can be forwarded from the host to the container.",
           "type": "array",
           "items": {
             "$ref": "#/definitions/ForwardPort"
@@ -173,6 +173,7 @@
           "default": []
         },
         "portsAttributes": {
+          "description": "Settings to apply to forwardPorts. Ignored by devconcurrent.",
           "type": "object",
           "additionalProperties": {
             "$ref": "#/definitions/PortAttributes"
@@ -180,7 +181,7 @@
           "default": {}
         },
         "otherPortsAttributes": {
-          "description": "Set default properties that are applied to all ports that don't get properties from the\nsetting `remote.portsAttributes`. Ignored by devconcurrent.",
+          "description": "Default settings for forwardPorts. Ignored by devconcurrent.",
           "anyOf": [
             {
               "$ref": "#/definitions/PortAttributes"
@@ -220,6 +221,7 @@
           "default": null
         },
         "mounts": {
+          "description": "Mounts to setup on container create.",
           "type": "array",
           "items": {
             "$ref": "#/definitions/MountEntry"

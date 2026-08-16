@@ -209,6 +209,10 @@ impl<'de> Deserialize<'de> for Template {
 }
 
 impl Template {
+    pub(crate) fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
     pub(crate) fn parse(input: &str) -> Self {
         template
             .parse(input)

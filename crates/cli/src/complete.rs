@@ -6,7 +6,7 @@ use clap_complete::engine::CompletionCandidate;
 
 use crate::cli::{Cli, Commands};
 use crate::config::Config;
-use crate::helpers::SHELL_FD;
+use crate::helpers::{SHELL_ENV, SHELL_FD};
 use crate::worktree;
 
 fn is_completion_candidate(prefix: &str, candidate: &str) -> bool {
@@ -108,6 +108,9 @@ fn compose_prior_args() -> eyre::Result<Vec<String>> {
 /// shell command the binary writes there is `eval`ed in the calling shell.
 /// This lets subcommands like `go` cause a `cd` to take effect, without the
 /// wrapper needing to know which subcommands do what.
+///
+/// It also names itself via `SHELL_ENV`, so subcommands that emit shell syntax
+/// — `show env --export` — know which dialect to write.
 pub(crate) fn shell_function(shell: Shell, binary: &str) -> eyre::Result<String> {
     let quoted = shlex::try_quote(binary)?;
     let function = match shell {
@@ -115,7 +118,7 @@ pub(crate) fn shell_function(shell: Shell, binary: &str) -> eyre::Result<String>
             r#"
 dc() {{
     local cmds rc
-    {{ cmds=$({SHELL_FD}=3 {quoted} "$@" 3>&1 1>&4); rc=$?; }} 4>&1
+    {{ cmds=$({SHELL_FD}=3 {SHELL_ENV}={shell} {quoted} "$@" 3>&1 1>&4); rc=$?; }} 4>&1
     [ -n "$cmds" ] && eval "$cmds"
     return $rc
 }}
@@ -125,10 +128,14 @@ dc() {{
             r#"
 function dc --wraps {quoted}
     set -lx {SHELL_FD} 3
+    set -lx {SHELL_ENV} {shell}
     set -l tmp (mktemp)
     {quoted} $argv 3>$tmp
     set -l rc $status
-    set -l cmds (cat $tmp)
+    # `string collect` keeps a multi-line script in one argument; a bare
+    # command substitution would split it into a list and `eval` would rejoin
+    # the lines with spaces.
+    set -l cmds (cat $tmp | string collect)
     rm -f $tmp
     test -n "$cmds"
     and eval $cmds

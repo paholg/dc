@@ -23,13 +23,13 @@ pub(crate) fn remove_override_file(workspace: &Workspace) {
     }
 }
 
-/// Write the compose override and return docker compose base args.
-pub(crate) fn compose_cmd(
+/// `docker compose` pointed at the workspace's own compose files, without our
+/// override. Enough for read-only queries; anything that starts containers
+/// wants [`compose_cmd`].
+fn compose_base_cmd(
     devcontainer: &DevcontainerState,
     workspace: &Workspace,
 ) -> eyre::Result<tokio::process::Command> {
-    let override_file_path = write_compose_override(devcontainer, workspace)?;
-
     let mut cmd = tokio::process::Command::new("docker");
 
     cmd.args(["compose", "-p"])
@@ -42,8 +42,51 @@ pub(crate) fn compose_cmd(
             .arg(workspace.path.join(".devcontainer").join(f));
     }
 
+    Ok(cmd)
+}
+
+/// Write the compose override and return docker compose base args.
+pub(crate) fn compose_cmd(
+    devcontainer: &DevcontainerState,
+    workspace: &Workspace,
+) -> eyre::Result<tokio::process::Command> {
+    let override_file_path = write_compose_override(devcontainer, workspace)?;
+
+    let mut cmd = compose_base_cmd(devcontainer, workspace)?;
     cmd.arg("-f").arg(override_file_path);
     Ok(cmd)
+}
+
+/// Every service defined by this workspace's compose files, sorted.
+///
+/// Read from the compose configuration rather than from running containers, so
+/// the answer doesn't depend on what happens to be up, and so it covers
+/// services that carry no `proxy.services` entry.
+pub(crate) async fn compose_services(
+    devcontainer: &DevcontainerState,
+    workspace: &Workspace<'_>,
+) -> eyre::Result<Vec<String>> {
+    let mut cmd = compose_base_cmd(devcontainer, workspace)?;
+    cmd.args(["config", "--services"]);
+
+    let out = cmd
+        .output()
+        .await
+        .wrap_err("failed to run docker compose")?;
+    eyre::ensure!(
+        out.status.success(),
+        "docker compose config --services failed: {}",
+        String::from_utf8_lossy(&out.stderr).trim()
+    );
+
+    let mut services: Vec<String> = String::from_utf8(out.stdout)?
+        .lines()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(ToOwned::to_owned)
+        .collect();
+    services.sort();
+    Ok(services)
 }
 
 pub(crate) async fn compose_ps_q(

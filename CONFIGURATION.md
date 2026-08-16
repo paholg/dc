@@ -89,6 +89,8 @@ Here are the options that can go in `customizations.devconcurrent`:
   * `hostname` [default: `{{workspace}}.{{service}}.test`] - a [handlebars](https://handlebarsjs.com/)
     template to determine the hostname for containers.
   * `services.BAR` - configure the proxy for compose service `BAR`.
+    * `hostname` - a handlebars template for just this service's hostname,
+      overriding the project-level `hostname`. Same variables are available.
     * `ports` - configure the port-maps for this service. This is an array of objects.
       * `ip` [default: `0.0.0.0`] - the IP address the proxy will listen on.
       * `host` - the host port the proxy listens on
@@ -96,3 +98,9 @@ Here are the options that can go in `customizations.devconcurrent`:
       * `tls` [default: `false`] - if `true`, the proxy will act as an http
         proxy, performing TLS termination so it can serve `https`. If `false`,
         the proxy just forwards raw bytes, acting as a simple port-forwarder.
+* `env.FOO` - a handlebars template for shell variable `FOO`, rendered by
+  `dc show env` and set in your shell by `dc show env --export`. `{{hostname 'bar'}}`
+  expands to compose service `bar`'s proxied hostname; `root`, `project` and
+  `workspace` are available as plain variables. Unlike hostname templates, these
+  render strictly: an unknown variable is an error rather than an empty string.
+  See the [README](README.md#workspace-variables).

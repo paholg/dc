@@ -103,6 +103,86 @@ impl ProxyOptions {
         };
         hbs.render_template(source, &ctx).ok()
     }
+
+    /// Render one `customizations.devconcurrent.env` value for this workspace.
+    ///
+    /// `{{hostname 'svc'}}` resolves through [`Self::render_hostname`]; `root`,
+    /// `project` and `workspace` are available as plain variables.
+    ///
+    /// Unlike [`Self::render_hostname`], this renders in strict mode: these
+    /// values end up as shell variables, where a silently empty one is far
+    /// worse than a loud failure.
+    pub fn render_env_value(
+        &self,
+        project: &str,
+        workspace: &str,
+        root: bool,
+        template: &Template,
+    ) -> Result<String, handlebars::RenderError> {
+        #[derive(serde::Serialize)]
+        struct Ctx<'a> {
+            root: bool,
+            project: &'a str,
+            workspace: &'a str,
+        }
+
+        let mut hbs = handlebars::Handlebars::new();
+        hbs.set_strict_mode(true);
+        hbs.register_helper(
+            "hostname",
+            Box::new(HostnameHelper {
+                options: self.clone(),
+                project: project.to_string(),
+                workspace: workspace.to_string(),
+                root,
+            }),
+        );
+
+        let ctx = Ctx {
+            root,
+            project,
+            workspace,
+        };
+        hbs.render_template(template.source(), &ctx)
+    }
+}
+
+/// The `{{hostname 'service'}}` helper available in `env` templates.
+struct HostnameHelper {
+    options: ProxyOptions,
+    project: String,
+    workspace: String,
+    root: bool,
+}
+
+impl handlebars::HelperDef for HostnameHelper {
+    fn call<'reg: 'rc, 'rc>(
+        &self,
+        h: &handlebars::Helper<'rc>,
+        _: &'reg handlebars::Handlebars<'reg>,
+        _: &'rc handlebars::Context,
+        _: &mut handlebars::RenderContext<'reg, 'rc>,
+        out: &mut dyn handlebars::Output,
+    ) -> handlebars::HelperResult {
+        let service = h.param(0).and_then(|p| p.value().as_str()).ok_or_else(|| {
+            handlebars::RenderErrorReason::Other(
+                "the `hostname` helper takes one string argument, e.g. {{hostname 'app'}}"
+                    .to_string(),
+            )
+        })?;
+
+        let hostname = self
+            .options
+            .render_hostname(&self.project, &self.workspace, service, self.root)
+            .ok_or_else(|| {
+                handlebars::RenderErrorReason::Other(format!(
+                    "could not render the hostname template for service {service:?}"
+                ))
+            })?;
+
+        out.write(&hostname)?;
+        Ok(())
+    }
 }
 
 #[derive(Deserialize, Serialize, Clone, Debug, Default, JsonSchema)]
@@ -169,8 +249,8 @@ impl<'de> Deserialize<'de> for ProxyPort {
     }
 }
 
-/// A Handlebars hostname template, compiled at deserialization time so
-/// syntax errors surface as config-load errors rather than at first use.
+/// A Handlebars template, compiled at deserialization time so syntax errors
+/// surface as config-load errors rather than at first use.
 #[derive(Clone, Debug)]
 pub struct Template {
     source: String,
@@ -222,15 +302,16 @@ impl Serialize for Template {
 
 impl JsonSchema for Template {
     fn schema_name() -> std::borrow::Cow<'static, str> {
-        "ProxyHostnameTemplate".into()
+        "HandlebarsTemplate".into()
     }
 
     fn json_schema(_: &mut SchemaGenerator) -> Schema {
         json_schema!({
             "type": "string",
             "description":
-                "Handlebars template for the proxied hostname. \
-                Variables: `root` (bool), `project`, `workspace`, `service`.",
+                "A Handlebars template. Hostname templates get `root` (bool), \
+                `project`, `workspace` and `service`; `env` templates get \
+                `root`, `project`, `workspace` and the `hostname` helper.",
         })
     }
 }
@@ -274,7 +355,8 @@ mod tests {
             "feature.test"
         );
         assert_eq!(
-            opts.render_hostname("proj", "feature", "db", false).unwrap(),
+            opts.render_hostname("proj", "feature", "db", false)
+                .unwrap(),
             "feature.db.test"
         );
     }
@@ -283,8 +365,76 @@ mod tests {
     fn falls_back_to_the_default_template() {
         let opts = ProxyOptions::default();
         assert_eq!(
-            opts.render_hostname("proj", "feature", "db", false).unwrap(),
+            opts.render_hostname("proj", "feature", "db", false)
+                .unwrap(),
             "feature.db.test"
+        );
+    }
+
+    #[test]
+    fn env_hostname_helper_follows_the_service_override() {
+        let opts = ProxyOptions {
+            services: [(
+                "postgres".to_string(),
+                ProxyService {
+                    hostname: Some(template("db.{{workspace}}.test")),
+                    ..ProxyService::default()
+                },
+            )]
+            .into_iter()
+            .collect(),
+            ..ProxyOptions::default()
+        };
+        let url = template("postgres://user@{{hostname 'postgres'}}:5432/db");
+        assert_eq!(
+            opts.render_env_value("proj", "feature", false, &url)
+                .unwrap(),
+            "postgres://user@db.feature.test:5432/db"
+        );
+    }
+
+    #[test]
+    fn env_hostname_helper_takes_either_quote_style() {
+        let opts = ProxyOptions::default();
+        for source in ["{{hostname 'app'}}", r#"{{hostname "app"}}"#] {
+            assert_eq!(
+                opts.render_env_value("proj", "feature", false, &template(source))
+                    .unwrap(),
+                "feature.app.test",
+                "{source}"
+            );
+        }
+    }
+
+    #[test]
+    fn env_templates_see_the_workspace() {
+        let opts = ProxyOptions::default();
+        assert_eq!(
+            opts.render_env_value("proj", "feature", false, &template("db_{{workspace}}"))
+                .unwrap(),
+            "db_feature"
+        );
+    }
+
+    /// A silently empty shell variable is worse than a failed prompt.
+    #[test]
+    fn env_templates_reject_unknown_variables() {
+        let opts = ProxyOptions::default();
+        let err = opts
+            .render_env_value("proj", "feature", false, &template("{{postgres}}"))
+            .expect_err("strict mode");
+        assert!(err.to_string().contains("postgres"), "got: {err}");
+    }
+
+    #[test]
+    fn env_hostname_helper_needs_a_service() {
+        let opts = ProxyOptions::default();
+        let err = opts
+            .render_env_value("proj", "feature", false, &template("{{hostname}}"))
+            .expect_err("no argument");
+        assert!(
+            err.to_string().contains("one string argument"),
+            "got: {err}"
         );
     }
 

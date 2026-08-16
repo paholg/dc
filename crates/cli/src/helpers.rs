@@ -4,6 +4,10 @@ use std::path::PathBuf;
 use serde::Deserialize;
 
 pub(crate) const SHELL_FD: &str = "DEVCONCURRENT_SHELL_FD";
+/// Names the shell that sourced our integration. Set by the `dc` wrapper
+/// function, which is generated per shell, so commands that need to emit shell
+/// syntax don't have to guess.
+pub(crate) const SHELL_ENV: &str = "DEVCONCURRENT_SHELL";
 
 /// Send a shell command to the calling shell (via the `dc` wrapper function).
 ///
@@ -20,6 +24,11 @@ pub(crate) fn forward_to_shell(command: &str) -> eyre::Result<()> {
         println!("{command}");
     }
     Ok(())
+}
+
+/// The shell that sourced our integration, per [`SHELL_ENV`].
+pub(crate) fn calling_shell() -> Option<clap_complete::Shell> {
+    std::env::var(SHELL_ENV).ok()?.parse().ok()
 }
 
 /// Simple validator for workspace and project names.

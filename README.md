@@ -209,6 +209,8 @@ This will enhance the commands we discussed above:
   `--workspace` to see the containers within a workspace.
 * You can also use `dc show` to show information about the current workspace;
   this can be useful if you want to include it in a shell prompt or similar.
+  It has subcommands for the workspace name, forwarded ports, container IPs,
+  proxied hostnames, and your [configured variables](#workspace-variables).
 
 In addition, we introduce some new commands:
 
@@ -363,11 +365,15 @@ On MacOs, use `dscacheutil -q host -a name foo.app.test` instead. `dig` reads
 `/etc/resolv.conf` and asks those servers directly; it never looks at
 `/etc/resolver`, so it will report nothing here even when everything is working.
 
-You can now reference containers by hostname. For example, if you have a
-database at compose service `postgres`, you can set your database url to
-`$(devconcurrent show workspace).postgres.test` or just
-`$(devconcurrent show ip postgres)`, but be aware the IP can change on container
-re-creation.
+You can now reference containers by hostname. Ask for one with
+`dc show hostname postgres`, or list them all with `dc show hostname`. The
+service list comes from your compose configuration, so it doesn't depend on
+what's currently running, and a typo'd service name is an error rather than a
+hostname that resolves to nothing. There is also `dc show ip postgres`, but be
+aware the IP can change on container re-creation.
+
+Rather than calling that once per service, see
+[workspace variables](#workspace-variables) to get them all in one go.
 
 #### DNS Configuration
 
@@ -404,6 +410,57 @@ hostname while leaving the rest alone:
   }
 }
 ```
+
+#### Workspace variables
+
+TODO: Write instructions here.
+
+```json
+{
+  "customizations": {
+    "devconcurrent": {
+      "env": {
+        "APP_URL": "https://{{hostname 'app'}}",
+        "DATABASE_URL": "postgres://postgres:postgres@{{hostname 'postgres'}}:5432/devel"
+      }
+    }
+  }
+}
+```
+
+The helper `{{hostname 'foo'}}` renders compose service `foo`'s hostname, and
+the variables `root`, `project` and `workspace` are available.
+
+`dc show env` prints them:
+
+```text
+VARIABLE      VALUE
+APP_URL       https://feature3.app.test
+DATABASE_URL  postgres://postgres:postgres@feature3.postgres.test:5432/db_feature3
+```
+
+And `dc show env --export` sets them in your shell, which you can register with
+
+TODO
+
+```sh
+# bash, in .bashrc
+PROMPT_COMMAND='dc show env --export'
+
+# fish, in config.fish
+function dc_env --on-event fish_prompt
+    dc show env --export
+end
+```
+
+This relies on the `dc` shell function from [Shell Setup](#shell-setup). Without
+it, name your shell explicitly and `eval` the result yourself:
+
+```sh
+eval "$(devconcurrent show env --export --shell bash)"
+```
+
+Note that these variables are set in your shell, on the host.
 
 ### Proxy and HTTPS
 

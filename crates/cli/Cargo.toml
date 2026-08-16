@@ -24,6 +24,7 @@ jiff = "0.2"
 num-bigint = "0.5.1"
 owo-colors = "4.3.0"
 rand = "0.10.2"
+rustix = { version = "1.1.4", features = ["process", "termios"] }
 # The `ring` provider rather than the default `aws-lc-rs`: it builds without
 # cmake, which keeps the release builds of the CLI portable.
 rustls = { version = "0.23", default-features = false, features = [

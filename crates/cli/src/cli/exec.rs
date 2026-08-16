@@ -80,6 +80,18 @@ impl Exec {
     }
 }
 
+/// True when stdin is a terminal and we are its foreground process group.
+/// A backgrounded run (`dc x cmd &`) still has a terminal on stdin, but
+/// attaching it with `-it` makes docker read the tty and set raw mode from
+/// the background, stopping the job with SIGTTIN/SIGTTOU.
+fn stdin_is_foreground_terminal() -> bool {
+    let stdin = std::io::stdin();
+    if !stdin.is_terminal() {
+        return false;
+    }
+    rustix::termios::tcgetpgrp(&stdin).is_ok_and(|fg| fg == rustix::process::getpgrp())
+}
+
 /// `user` is the rendered `remoteUser`. With no command on the CLI, we run the
 /// container user's shell.
 pub(crate) async fn exec_interactive(
@@ -91,7 +103,7 @@ pub(crate) async fn exec_interactive(
 ) -> eyre::Result<()> {
     let mut cmd = std::process::Command::new("docker");
     cmd.arg("exec");
-    if std::io::stdin().is_terminal() {
+    if stdin_is_foreground_terminal() {
         cmd.arg("-it");
     }
 

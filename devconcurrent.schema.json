@@ -350,7 +350,6 @@
           "$ref": "#/$defs/Customizations",
           "default": {
             "devconcurrent": {
-              "defaultExec": null,
               "worktreeFolder": null,
               "mountGit": null,
               "proxy": {
@@ -612,7 +611,6 @@
         "devconcurrent": {
           "$ref": "#/$defs/DcOptions",
           "default": {
-            "defaultExec": null,
             "worktreeFolder": null,
             "mountGit": null,
             "proxy": {
@@ -628,17 +626,6 @@
     "DcOptions": {
       "type": "object",
       "properties": {
-        "defaultExec": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/CmdTemplate"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
         "worktreeFolder": {
           "type": [
             "string",

@@ -1,6 +1,7 @@
 use clap::Args;
 use clap_complete::ArgValueCompleter;
 use color_eyre::owo_colors::OwoColorize;
+use eyre::WrapErr;
 use indexmap::IndexMap;
 use tracing::info_span;
 use tracing_indicatif::span_ext::IndicatifSpanExt;
@@ -12,8 +13,8 @@ use crate::complete::complete_workspace;
 use crate::config::Config;
 use crate::docker::compose::{compose_cmd, compose_ps_q};
 use crate::docker::probe;
-use crate::run::Runner;
 use crate::run::cmd::NamedCmd;
+use crate::run::{self, Runner};
 use crate::workspace::Workspace;
 use crate::worktree;
 
@@ -69,24 +70,38 @@ impl Up {
             name = up,
             description,
             message,
-            finish_message
+            finish_message,
+            failed = tracing::field::Empty,
         );
         span.pb_set_message(&pb_message);
         let _guard = span.enter();
 
-        if !workspace.is_root {
-            worktree::create(&workspace, self.detach, self.branch.as_deref()).await?;
+        let brought_up: eyre::Result<()> = async {
+            if !workspace.is_root {
+                worktree::create(&workspace, self.detach, self.branch.as_deref()).await?;
+            }
+
+            if state.has_devcontainer() {
+                self.up_devcontainer(&config, &state, &workspace).await?;
+            }
+
+            if self.go {
+                go::go(&workspace.path)?;
+            }
+
+            Ok(())
+        }
+        .await;
+
+        // Name the workspace in the error itself: an error gets pasted around
+        // without the log line above it that says which one we were bringing up.
+        let result = brought_up.wrap_err_with(|| format!("workspace: {}", workspace.name));
+
+        if result.is_err() {
+            run::mark_failed(&span);
         }
 
-        if state.has_devcontainer() {
-            self.up_devcontainer(&config, &state, &workspace).await?;
-        }
-
-        if self.go {
-            go::go(&workspace.path)?;
-        }
-
-        Ok(())
+        result
     }
 
     async fn up_devcontainer(
@@ -193,7 +208,10 @@ impl Up {
             let Some(cmd) = cmd else { continue };
             cmd.render(name, &context)?
                 .run_in_container(name, &container_id, user, workdir, remote_env)
-                .await?;
+                .await
+                // The container id alone doesn't say which compose service to go
+                // poke at once the hook has failed.
+                .wrap_err_with(|| format!("service: {}", devcontainer.config.service))?;
         }
 
         // Port forward if requested

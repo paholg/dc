@@ -1,11 +1,15 @@
 #![forbid(unsafe_code)]
 
+use std::io::Write;
+use std::process::ExitCode;
+
 use clap::{CommandFactory, Parser};
 use clap_complete::env::Shells;
 use clap_complete::{CompleteEnv, Shell};
 use color_eyre::config::HookBuilder;
 use eyre::eyre;
 
+use crate::ansi::{RED, RESET};
 use crate::cli::Cli;
 use crate::subscriber::init_subscriber;
 
@@ -24,9 +28,45 @@ mod table;
 mod workspace;
 mod worktree;
 
-pub async fn cli_main() -> eyre::Result<()> {
+pub async fn cli_main() -> ExitCode {
+    // Print the report ourselves rather than returning it to `main`: that writes
+    // straight to the fd while the progress bars still own the screen, which
+    // strands them in the scrollback and lets the next redraw eat the report.
+    // By here every span has closed, so the report comes last.
+    let result = run().await;
+
+    let Err(err) = result else {
+        return ExitCode::SUCCESS;
+    };
+
+    let report = format!("{RED}Error:{RESET} {err:?}");
+    match subscriber::stderr() {
+        Some(mut stderr) => {
+            let _ = writeln!(stderr, "{report}");
+            let _ = stderr.flush();
+        }
+        // We failed before the subscriber existed, so there are no bars to mind.
+        None => eprintln!("{report}"),
+    }
+
+    ExitCode::FAILURE
+}
+
+async fn run() -> eyre::Result<()> {
+    // The location section points at wherever we built the report — our own
+    // error plumbing — which tells a user nothing about their failing command.
+    // `RUST_BACKTRACE` brings it back, along with the backtrace, for debugging
+    // devconcurrent itself.
+    let debugging = std::env::var_os("RUST_BACKTRACE").is_some();
+
     HookBuilder::default()
         .display_env_section(false)
+        .display_location_section(debugging)
+        // We never install `tracing_error::ErrorLayer`, so a captured span trace
+        // renders nothing — but it holds every span it captured open until the
+        // report is dropped, which would force their closing lines out below the
+        // report they belong above.
+        .capture_span_trace_by_default(false)
         .install()?;
     init_subscriber();
 

@@ -49,6 +49,22 @@ impl run::Runnable for DockerExec<'_> {
         args.extend(self.cmd.as_args());
 
         let full_argv: Vec<&str> = std::iter::once("docker").chain(args).collect();
-        super::run_cmd(&full_argv, None).await
+
+        // Everything needed to reproduce the run, minus the `-e` flags: the
+        // probed environment is what made the old error unreadable.
+        let short_id = self.container.get(..12).unwrap_or(self.container);
+        let mut what = format!("`{}` in container {short_id}", self.cmd.description());
+        let mut details = Vec::new();
+        if let Some(u) = self.user {
+            details.push(format!("user {u}"));
+        }
+        if let Some(w) = self.workdir {
+            details.push(format!("cwd {}", w.display()));
+        }
+        if !details.is_empty() {
+            what.push_str(&format!(" ({})", details.join(", ")));
+        }
+
+        super::run_cmd(&full_argv, None, &what).await
     }
 }

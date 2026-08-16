@@ -82,6 +82,9 @@ on every platform:
 On Linux, `$XDG_CONFIG_HOME` is usually `~/.config`. Note that macOS does not
 use `~/.config` here, and that Windows adds a `config` subdirectory.
 
+Set the `DEVCONCURRENT_CONFIG` environment variable to read `config.toml` from
+a directory of your choosing instead.
+
 If you are unsure, run any `devconcurrent` command with no config file in
 place; the error names the exact path it looked for.
 
@@ -137,7 +140,7 @@ If you have multiple projects configured, then the project `dc` operates on is
 determined as follows:
 
 1. The `--project` flag
-2. The `DC_PROJECT` environment variable
+2. The `DEVCONCURRENT_PROJECT` environment variable
 3. The current directory, if you're inside the workspace of any project
 4. The first configured project
 

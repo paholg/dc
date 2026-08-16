@@ -10,6 +10,11 @@ use crate::helpers::{deserialize_shell_path, deserialize_shell_path_opt, validat
 
 pub(crate) const DEFAULT_PROXY_PORT: u16 = 43770;
 
+/// Name of the project to operate on, if `--project` isn't given.
+pub(crate) const PROJECT_ENV: &str = "DEVCONCURRENT_PROJECT";
+/// Directory to read `config.toml` from, overriding the platform default.
+pub(crate) const CONFIG_DIR_ENV: &str = "DEVCONCURRENT_CONFIG";
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct ProjectName(String);
 
@@ -123,9 +128,7 @@ pub(crate) struct Project {
 
 impl Config {
     pub(crate) fn load() -> eyre::Result<Self> {
-        let dirs = directories::ProjectDirs::from("", "", "devconcurrent")
-            .ok_or_else(|| eyre::eyre!("could not determine config directory"))?;
-        let path = dirs.config_dir().join("config.toml");
+        let path = config_dir()?.join("config.toml");
         Self::load_from_path(&path)
     }
 
@@ -142,7 +145,7 @@ impl Config {
         &self,
         project_name: Option<String>,
     ) -> eyre::Result<(ProjectName, &Project)> {
-        if let Some(name) = project_name.or_else(|| std::env::var("DC_PROJECT").ok()) {
+        if let Some(name) = project_name.or_else(|| std::env::var(PROJECT_ENV).ok()) {
             let name = ProjectName::new(name).map_err(|e| eyre!("invalid project name: {e}"))?;
             let project = self
                 .projects
@@ -183,6 +186,20 @@ impl Config {
 
         Ok(name)
     }
+}
+
+/// The directory we read `config.toml` from.
+pub(crate) fn config_dir() -> eyre::Result<PathBuf> {
+    if let Some(dir) = std::env::var_os(CONFIG_DIR_ENV) {
+        let dir = dir
+            .into_string()
+            .map_err(|_| eyre!("{CONFIG_DIR_ENV} is not valid unicode"))?;
+        return Ok(PathBuf::from(shellexpand::tilde(&dir).as_ref()));
+    }
+    Ok(directories::ProjectDirs::from("", "", "devconcurrent")
+        .ok_or_else(|| eyre!("could not determine config directory"))?
+        .config_dir()
+        .to_path_buf())
 }
 
 fn repo_root_for(cwd: &Path) -> Option<PathBuf> {

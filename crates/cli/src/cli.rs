@@ -24,7 +24,7 @@ pub(crate) struct Cli {
     #[arg(
         short,
         long,
-        help = "name of project [default: The DC_PROJECT variable, then the first configured project]",
+        help = "name of project [default: The DEVCONCURRENT_PROJECT variable, then the first configured project]",
         add = ArgValueCompleter::new(complete::complete_project),
     )]
     pub(crate) project: Option<String>,

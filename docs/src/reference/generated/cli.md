@@ -44,7 +44,7 @@ A tool for managing devcontainers, especially when combined with git worktrees
 
 ###### **Options:**
 
-* `-p`, `--project <PROJECT>` — name of project [default: The DC_PROJECT variable, then the first configured project]
+* `-p`, `--project <PROJECT>` — name of project [default: The DEVCONCURRENT_PROJECT variable, then the first configured project]
 
 
 

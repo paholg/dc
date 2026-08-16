@@ -1,0 +1,73 @@
+/* Restyle of mdbook-tabs, ported from the Material for MkDocs content-tabs
+ * design: an underlined label row instead of boxed buttons, an accent
+ * underline on the active tab, and grid-stacked panels so switching tabs
+ * never changes the container's height (no layout jump). The markup and
+ * behavior (tabs.js) are stock mdbook-tabs; only the look lives here. */
+
+.mdbook-tabs-container {
+    display: grid;
+    grid-template-columns: 100%;
+    margin: 1em 0;
+}
+
+.mdbook-tabs {
+    grid-row: 1;
+    grid-column: 1;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    border-bottom: 1px solid var(--table-border-color);
+}
+
+.mdbook-tab {
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 0.6rem 1.2rem;
+    font-size: 1.4rem;
+    /* Bold on every tab, not just the active one, so labels don't change
+       width (and shift their neighbors) when selected. */
+    font-weight: bold;
+    line-height: 1.45em;
+    color: var(--fg);
+    opacity: 0.65;
+    border-bottom: 2px solid transparent;
+    /* Overlap the row's rule so the active underline replaces it. */
+    margin-bottom: -1px;
+    transition: opacity 0.1s;
+}
+
+.mdbook-tab:hover {
+    opacity: 1;
+}
+
+.mdbook-tab.active {
+    opacity: 1;
+    color: var(--links);
+    border-bottom-color: var(--links);
+}
+
+/* Every panel occupies the same grid cell: the container is always as tall
+ * as the tallest panel, so switching tabs never moves the rest of the page. */
+.mdbook-tab-content {
+    grid-row: 2;
+    grid-column: 1;
+    /* Let wide code blocks scroll inside the cell instead of widening it. */
+    min-width: 0;
+    padding-top: 0.8rem;
+}
+
+.mdbook-tab-content.hidden {
+    /* Stay in the grid (for the shared height) while invisible and
+       non-interactive; `display: none` would collapse the cell. */
+    display: block;
+    visibility: hidden;
+}
+
+.mdbook-tab-content > :first-child {
+    margin-top: 0;
+}
+
+.mdbook-tab-content > :last-child {
+    margin-bottom: 0;
+}

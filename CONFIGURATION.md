@@ -18,7 +18,7 @@ First, if you use [tombi](https://tombi-toml.github.io/tombi/), then it's
 recommended you start this config with the line
 
 ```toml
-#:schema https://raw.githubusercontent.com/paholg/devconcurrent/refs/heads/main/devconcurrent.schema.json
+#:schema https://devconcurrent.paholg.com/devconcurrent.schema.json
 ```
 
 Here are the options:

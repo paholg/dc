@@ -60,10 +60,13 @@ impl<'de> Deserialize<'de> for ProjectName {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub(crate) struct Config {
+    /// Configured projects by name.
     #[serde(default)]
     pub(crate) projects: IndexMap<ProjectName, Project>,
+    /// Global proxy settings.
     #[serde(default)]
     pub(crate) proxy: ProxyGlobal,
+    /// Shell-integration settings.
     #[serde(default)]
     pub(crate) shell: ShellGlobal,
 }
@@ -73,11 +76,8 @@ pub(crate) struct Config {
 #[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase", default)]
 pub(crate) struct ShellGlobal {
-    /// Also register a prompt hook that keeps the variables from
-    /// `customizations.devconcurrent.env` in sync with the workspace you are
-    /// standing in, as though you ran `dc show env --export` yourself.
-    ///
-    /// Default: false
+    /// Register a prompt hook to auto-set the variables from `customizations.devconcurrent.env`
+    /// based on your current working directory.
     pub(crate) export_env: bool,
 }
 
@@ -86,12 +86,8 @@ pub(crate) struct ShellGlobal {
 #[serde(rename_all = "camelCase", default)]
 pub(crate) struct ProxyGlobal {
     /// The DNS port the proxy listens on.
-    ///
-    /// Default: 43770
     pub(crate) port: u16,
-    /// Path to mkcert's CAROOT directory on the host. Required to serve
-    /// services over https; leave unset to serve them over http only. Find it
-    /// with `mkcert -CAROOT`.
+    /// Path to your CA root directory on the host. Find it with `mkcert -CAROOT`.
     #[serde(default, deserialize_with = "deserialize_shell_path_opt")]
     pub(crate) ca_root: Option<PathBuf>,
 }
@@ -105,14 +101,22 @@ impl Default for ProxyGlobal {
     }
 }
 
+/// A devconcurrent-enabled project.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct Project {
+    /// The project location on your host.
     #[serde(deserialize_with = "deserialize_shell_path")]
     pub(crate) path: PathBuf,
+    /// The directory where devconcurrent will place worktrees. Defaults to the platform data
+    /// directory. This is also settable in the devcontainer, but it's available here for projects
+    /// that don't use devcontainers.
     #[serde(default, deserialize_with = "deserialize_shell_path_opt")]
     pub(crate) worktree_folder: Option<PathBuf>,
-    // We'll parse this properly when merging with Figment.
+    /// Any of the options from `devcontainer.json` (<https://containers.dev/implementors/json_reference/>),
+    /// as per-user overrides. These are merged with the project's `devcontainer.json`, with arrays
+    /// concatenated and this file winning conflicts.
+    // NOTE: This gets parsed properly later, when merging with Figment.
     #[schemars(with = "Option<DevcontainerConfig>")]
     pub(crate) devcontainer: Option<toml::Value>,
 }

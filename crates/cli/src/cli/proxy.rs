@@ -33,6 +33,7 @@ const READY_TIMEOUT: Duration = Duration::from_secs(30);
 static PROXY_IMAGE: LazyLock<String> =
     LazyLock::new(|| format!("{PROXY_IMAGE_NAME}:{PROXY_IMAGE_TAG}"));
 
+/// Manage the DNS server and HTTP proxy
 #[derive(Debug, Args)]
 pub(crate) struct Proxy {
     #[command(subcommand)]

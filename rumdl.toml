@@ -1,5 +1,9 @@
 [global]
 flavor = "gfm"
+exclude = [
+  # Machine-generated:
+  "docs/src/reference/generated",
+]
 
 [MD013]
 code_blocks = false

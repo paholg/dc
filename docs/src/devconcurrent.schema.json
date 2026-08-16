@@ -4,6 +4,7 @@
   "type": "object",
   "properties": {
     "projects": {
+      "description": "Configured projects by name.",
       "type": "object",
       "additionalProperties": false,
       "patternProperties": {
@@ -13,6 +14,7 @@
       }
     },
     "proxy": {
+      "description": "Global proxy settings.",
       "$ref": "#/$defs/ProxyGlobal",
       "default": {
         "port": 43770,
@@ -20,6 +22,7 @@
       }
     },
     "shell": {
+      "description": "Shell-integration settings.",
       "$ref": "#/$defs/ShellGlobal",
       "default": {
         "exportEnv": false
@@ -29,12 +32,15 @@
   "x-tombi-toml-version": "v1.1.0",
   "$defs": {
     "Project": {
+      "description": "A devconcurrent-enabled project.",
       "type": "object",
       "properties": {
         "path": {
+          "description": "The project location on your host.",
           "type": "string"
         },
         "worktreeFolder": {
+          "description": "The directory where devconcurrent will place worktrees. Defaults to the platform data\ndirectory. This is also settable in the devcontainer, but it's available here for projects\nthat don't use devcontainers.",
           "type": [
             "string",
             "null"
@@ -42,6 +48,7 @@
           "default": null
         },
         "devcontainer": {
+          "description": "Any of the options from `devcontainer.json` (<https://containers.dev/implementors/json_reference/>),\nas per-user overrides. These are merged with the project's `devcontainer.json`, with arrays\nconcatenated and this file winning conflicts.",
           "anyOf": [
             {
               "$ref": "#/$defs/DevcontainerConfig"
@@ -627,6 +634,7 @@
       "type": "object",
       "properties": {
         "worktreeFolder": {
+          "description": "The directory where devconcurrent will place worktrees.",
           "type": [
             "string",
             "null"
@@ -634,15 +642,15 @@
           "default": null
         },
         "mountGit": {
-          "description": "Whether to mount the project's git directory into each workspace's devcontainer.\n\nGit worktrees have a simple `.git` file that points to the actual `.git` directory. If that\ndirectory isn't available, then no git commands will work in the worktree. By mounting it\nat its original path in the devcontainer, we allow you to use `git` freely for the workspace,\nboth inside and out of the devcontainer.\n\nDefaults to true, but we use Option so it can be overridden.",
+          "description": "Whether to mount the project's git directory into each workspace's devcontainer.\n\nGit worktrees have a simple `.git` file that points to the actual `.git` directory. If that\ndirectory isn't available, then no git commands will work. By mounting it at its original\npath in the devcontainer, `git` should just work, both inside and out of the container.",
           "type": [
             "boolean",
             "null"
           ],
-          "default": null
+          "default": true
         },
         "proxy": {
-          "description": "Reverse-proxy configuration.\n\nLeave empty if you don't wish to use it.",
+          "description": "Configure DNS hostnames and HTTP proxy.",
           "$ref": "#/$defs/ProxyOptions",
           "default": {
             "enable": false,
@@ -651,7 +659,7 @@
           }
         },
         "env": {
-          "description": "Shell variables describing the current workspace, rendered by\n`dc show env`.\n\nEach value is a Handlebars template. `{{hostname 'svc'}}` expands to the\nproxied hostname of compose service `svc`; `project`, `workspace` and\n`root` are available as plain variables. For example:\n\n```json\n\"env\": {\n  \"DATABASE_URL\": \"postgres://postgres:postgres@{{hostname 'postgres'}}:5432/db\"\n}\n```",
+          "description": "Define shell variables\n\nThese are rendered by `dc show env` or automatically set if `shell.exportEnv` is true.\n\nThe values are given by handlebars templates with the following:\n  * The `hostname` helper gives the hostname for a service.\n  * The following variables are populated: `project`, `workspace`, and `root`.",
           "type": "object",
           "additionalProperties": false,
           "patternProperties": {
@@ -659,6 +667,12 @@
               "$ref": "#/$defs/HandlebarsTemplate"
             }
           },
+          "examples": [
+            {
+              "BASE_URL": "{{ hostname 'app' }}",
+              "DATABASE_URL": "postgres://postgres:postgres@{{hostname 'postgres'}}:5432/db"
+            }
+          ],
           "default": {}
         }
       }
@@ -668,12 +682,12 @@
       "type": "object",
       "properties": {
         "enable": {
-          "description": "Opt in to proxy routing for this project.",
+          "description": "Enable the devconcurrent DNS and HTTP proxy for this project.",
           "type": "boolean",
           "default": false
         },
         "hostname": {
-          "description": "Handlebars template for the proxied hostname, used by every service\nthat does not set its own.\n\nAvailable variables:\n- `root` (bool) — whether this is the root workspace\n- `project` — project name\n- `workspace` — workspace name\n- `service` — name of the service from compose\n\nDefault: {{workspace}}.{{service}}.test",
+          "description": "Handlebars template for the proxied hostname, used by every service\nthat does not set its own.\n\nAvailable variables:\n- `root` (bool) — whether this is the root workspace\n- `project` — project name\n- `workspace` — workspace name\n- `service` — name of the service from compose",
           "anyOf": [
             {
               "$ref": "#/$defs/HandlebarsTemplate"
@@ -682,10 +696,10 @@
               "type": "null"
             }
           ],
-          "default": null
+          "default": "{{workspace}}.{{service}}.test"
         },
         "services": {
-          "description": "Per-compose-service configuration.",
+          "description": "Configure proxy settings for each docker compose service.",
           "type": "object",
           "additionalProperties": {
             "$ref": "#/$defs/ProxyService"
@@ -702,7 +716,7 @@
       "type": "object",
       "properties": {
         "hostname": {
-          "description": "Handlebars template for this service's hostname. Overrides the\nproject-level `hostname`; same variables are available.",
+          "description": "Handlebars template for this service's hostname. Overrides the\nproject-level `hostname`.",
           "anyOf": [
             {
               "$ref": "#/$defs/HandlebarsTemplate"
@@ -714,7 +728,7 @@
           "default": null
         },
         "containerPort": {
-          "description": "The port on which your service listens inside the container. The proxy\nserves it on ports 80 and 443, terminating TLS on 443, so whatever\nlistens here must speak plain HTTP.\n\nAll ports other than 80 and 443 are forwarded raw to the service, whether\nthis is set or not.",
+          "description": "If set, devconcurrent will run an HTTP proxy on ports 80 and 443 to this port in your\ncontainer, performing TLS termination on 443.\n\nIf this service runs a web service, put its port here.\n\nAll ports other than 80 and 443 are forwarded raw to the service, whether\nthis is set or not.",
           "type": [
             "integer",
             "null"
@@ -731,7 +745,7 @@
       "type": "object",
       "properties": {
         "port": {
-          "description": "The DNS port the proxy listens on.\n\nDefault: 43770",
+          "description": "The DNS port the proxy listens on.",
           "type": "integer",
           "format": "uint16",
           "minimum": 0,
@@ -739,7 +753,7 @@
           "default": 43770
         },
         "caRoot": {
-          "description": "Path to mkcert's CAROOT directory on the host. Required to serve\nservices over https; leave unset to serve them over http only. Find it\nwith `mkcert -CAROOT`.",
+          "description": "Path to your CA root directory on the host. Find it with `mkcert -CAROOT`.",
           "type": [
             "string",
             "null"
@@ -753,7 +767,7 @@
       "type": "object",
       "properties": {
         "exportEnv": {
-          "description": "Also register a prompt hook that keeps the variables from\n`customizations.devconcurrent.env` in sync with the workspace you are\nstanding in, as though you ran `dc show env --export` yourself.\n\nDefault: false",
+          "description": "Register a prompt hook to auto-set the variables from `customizations.devconcurrent.env`\nbased on your current working directory.",
           "type": "boolean",
           "default": false
         }

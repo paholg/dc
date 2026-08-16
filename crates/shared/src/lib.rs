@@ -25,6 +25,7 @@ pub const PROXY_CONFIG_FILE: &str = "projects.json";
 /// Directory inside the proxy container where the mkcert CAROOT is
 /// bind-mounted read-only when TLS is enabled.
 pub const PROXY_CA_DIR: &str = "/etc/proxy-ca";
+
 /// Directory inside each sidecar container where the proxy writes the per-
 /// service plan and (if TLS is enabled) cert + key.
 pub const SIDECAR_PLAN_DIR: &str = "/etc/sidecar";
@@ -45,7 +46,7 @@ pub const DEFAULT_HOSTNAME_TEMPLATE: &str = "{{workspace}}.{{service}}.test";
 #[derive(Deserialize, Serialize, Clone, Debug, Default, JsonSchema)]
 #[serde(rename_all = "camelCase", default)]
 pub struct ProxyOptions {
-    /// Opt in to proxy routing for this project.
+    /// Enable the devconcurrent DNS and HTTP proxy for this project.
     pub enable: bool,
 
     /// Handlebars template for the proxied hostname, used by every service
@@ -56,11 +57,10 @@ pub struct ProxyOptions {
     /// - `project` — project name
     /// - `workspace` — workspace name
     /// - `service` — name of the service from compose
-    ///
-    /// Default: {{workspace}}.{{service}}.test
+    #[schemars(extend("default" = DEFAULT_HOSTNAME_TEMPLATE))]
     pub hostname: Option<Template>,
 
-    /// Per-compose-service configuration.
+    /// Configure proxy settings for each docker compose service.
     pub services: IndexMap<String, ProxyService>,
 }
 
@@ -221,12 +221,13 @@ pub mod navigation {
 #[serde(rename_all = "camelCase", default)]
 pub struct ProxyService {
     /// Handlebars template for this service's hostname. Overrides the
-    /// project-level `hostname`; same variables are available.
+    /// project-level `hostname`.
     pub hostname: Option<Template>,
 
-    /// The port on which your service listens inside the container. The proxy
-    /// serves it on ports 80 and 443, terminating TLS on 443, so whatever
-    /// listens here must speak plain HTTP.
+    /// If set, devconcurrent will run an HTTP proxy on ports 80 and 443 to this port in your
+    /// container, performing TLS termination on 443.
+    ///
+    /// If this service runs a web service, put its port here.
     ///
     /// All ports other than 80 and 443 are forwarded raw to the service, whether
     /// this is set or not.
@@ -238,7 +239,7 @@ pub struct ProxyService {
 #[derive(Clone, Debug)]
 pub struct Template {
     source: String,
-    // TODO: Should we be using this? Currently it's used to ensure valida at deserialization time,
+    // TODO: Should we be using this? Currently it's used to ensure validate at deserialization time,
     // but we could probably also use it to render?
     #[allow(unused)]
     compiled: handlebars::Template,

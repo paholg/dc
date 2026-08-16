@@ -7,11 +7,12 @@
     "projects": {
       "description": "Configured projects by name.",
       "type": "object",
-      "additionalProperties": false,
-      "patternProperties": {
-        "^[A-Za-z0-9_-]+$": {
-          "$ref": "#/definitions/Project"
-        }
+      "propertyNames": {
+        "type": "string",
+        "pattern": "^[A-Za-z0-9_-]+$"
+      },
+      "additionalProperties": {
+        "$ref": "#/definitions/Project"
       }
     },
     "proxy": {
@@ -718,11 +719,13 @@
         "env": {
           "description": "Define shell variables\n\nThese are rendered by `dc show env` or automatically set if `shell.exportEnv` is true.\n\nThe values are given by handlebars templates with the following:\n  * The `hostname` helper gives the hostname for a service.\n  * The following variables are populated: `project`, `workspace`, and `root`.",
           "type": "object",
-          "additionalProperties": false,
-          "patternProperties": {
-            "^[A-Za-z_][A-Za-z0-9_]*$": {
-              "$ref": "#/definitions/HandlebarsTemplate"
-            }
+          "propertyNames": {
+            "description": "A shell variable name.",
+            "type": "string",
+            "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+          },
+          "additionalProperties": {
+            "$ref": "#/definitions/HandlebarsTemplate"
           },
           "examples": [
             {

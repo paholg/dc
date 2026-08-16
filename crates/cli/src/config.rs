@@ -67,6 +67,7 @@ impl<'de> Deserialize<'de> for ProjectName {
 pub(crate) struct Config {
     /// Configured projects by name.
     #[serde(default)]
+    #[schemars(with = "crate::helpers::PatternMap<ProjectName, Project>")]
     pub(crate) projects: IndexMap<ProjectName, Project>,
     /// Global proxy settings.
     #[serde(default)]

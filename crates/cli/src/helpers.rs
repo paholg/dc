@@ -57,3 +57,31 @@ pub(crate) fn deserialize_shell_path<'de, D: serde::Deserializer<'de>>(
     let s = String::deserialize(d)?;
     Ok(PathBuf::from(shellexpand::tilde(&s).as_ref()))
 }
+
+/// Schemars generates a map with patterns as `patternProperties` with `additionalProperties: false`,
+/// which doesn't give an ideal editor experience.
+///
+/// This allows one to instead emit `propertyNames`.
+pub(crate) struct PatternMap<K, V>(std::marker::PhantomData<(K, V)>);
+
+impl<K: schemars::JsonSchema, V: schemars::JsonSchema> schemars::JsonSchema for PatternMap<K, V> {
+    fn inline_schema() -> bool {
+        true
+    }
+
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        format!("Map_from_{}_to_{}", K::schema_name(), V::schema_name()).into()
+    }
+
+    fn schema_id() -> std::borrow::Cow<'static, str> {
+        format!("Map<{}, {}>", K::schema_id(), V::schema_id()).into()
+    }
+
+    fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({
+            "type": "object",
+            "propertyNames": K::json_schema(generator),
+            "additionalProperties": generator.subschema_for::<V>(),
+        })
+    }
+}

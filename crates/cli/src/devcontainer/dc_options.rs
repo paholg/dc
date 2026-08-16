@@ -39,6 +39,7 @@ pub(crate) struct DcOptions {
         "BASE_URL": "{{ hostname 'app' }}",
         "DATABASE_URL": "postgres://postgres:postgres@{{hostname 'postgres'}}:5432/db"
     }))]
+    #[schemars(with = "crate::helpers::PatternMap<EnvVarName, Template>")]
     pub(crate) env: IndexMap<EnvVarName, Template>,
 }
 

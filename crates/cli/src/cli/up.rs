@@ -97,7 +97,9 @@ impl Up {
         // container is running before compose-up so it can react to start
         // events.
         if devcontainer.proxy_enabled() {
-            let proxy = proxy::ProxyState::from_workspace(&config, Some(&workspace)).await?;
+            let project = workspace.state.project_name.clone();
+            let proxy =
+                proxy::ProxyState::from_workspace(&config, project, Some(&workspace)).await?;
             proxy::ensure_up(proxy).await?;
         }
 

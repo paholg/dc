@@ -365,6 +365,30 @@ On MacOs, use `dscacheutil -q host -a name foo.app.test` instead. `dig` reads
 `/etc/resolv.conf` and asks those servers directly; it never looks at
 `/etc/resolver`, so it will report nothing here even when everything is working.
 
+Better still, run `dc proxy status`. It checks every hostname and port you have
+configured, one layer at a time, and tells you which one broke:
+
+```text
+WORKSPACE: foo
+
+SERVICE  HOSTNAME      PORT      CONTAINER  SIDECAR  DNS  RESOLV  CONNECT  TLS  APP
+app      foo.app.test  443→8080  ✓          ✓        ✓    ✓       ✓        ✓    200
+db       foo.db.test   5432      ✓          -        ✓    ✗       ✗        -    -
+
+  ✗ db 5432 · resolv: the system resolver doesn't know foo.db.test; .test isn't
+    routed to 127.0.0.1:43770 (see the DNS section of the README)
+  ✗ db 5432 · connect: nothing is listening on 172.18.0.3:5432
+```
+
+A `✗` under `DNS` means the proxy itself doesn't know the name; a `✗` under
+`RESOLV` with `DNS` passing means the proxy knows it but your system isn't
+asking the proxy — that's the setup above. It also reports whether the proxy is
+running settings you have since changed, so you know when to re-run
+`dc proxy up`, and whether your CA is actually in the system trust store —
+which a passing `TLS` column does _not_ tell you, since that check trusts your
+`caRoot` and nothing else. It exits non-zero if anything failed, and takes
+`--json` if you want to script against it.
+
 You can now reference containers by hostname. Ask for one with
 `dc show hostname postgres`, or list them all with `dc show hostname`. The
 service list comes from your compose configuration, so it doesn't depend on

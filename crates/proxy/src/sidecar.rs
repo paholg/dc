@@ -13,8 +13,8 @@
 //! such as docker-mac-net-connect.
 
 use docker::{
-    Docker, PROJECT_LABEL, PROXY_GROUP_LABEL, PROXY_SERVICE_LABEL, PROXY_SIDECAR_LABEL,
-    PROXY_TARGET_LABEL, WORKSPACE_LABEL, build_archive,
+    Docker, PROJECT_LABEL, PROXY_CONFIG_HASH_LABEL, PROXY_GROUP_LABEL, PROXY_SERVICE_LABEL,
+    PROXY_SIDECAR_LABEL, PROXY_TARGET_LABEL, WORKSPACE_LABEL, build_archive,
 };
 use eyre::{Result, WrapErr};
 use shared::{
@@ -118,6 +118,7 @@ pub async fn create_sidecar(
         .cmd(vec!["sidecar".to_string()])
         .with_label(PROXY_GROUP_LABEL, "true")
         .with_label(PROXY_SIDECAR_LABEL, "true")
+        .with_label(PROXY_CONFIG_HASH_LABEL, plan.hash())
         .with_label(PROXY_TARGET_LABEL, target_cid)
         .with_label(PROJECT_LABEL, project)
         .with_label(WORKSPACE_LABEL, workspace)

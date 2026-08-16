@@ -10,9 +10,8 @@ handlebars = "6.4.1"
 indexmap = { workspace = true }
 schemars = { version = "1.2.1", features = ["indexmap2", "preserve_order"] }
 serde = { workspace = true }
-
-[dev-dependencies]
 serde_json = { workspace = true }
+sha2 = "0.11.0"
 
 [lints]
 workspace = true

@@ -13,6 +13,7 @@ use indexmap::IndexMap;
 use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
 use serde::de::{self, Deserializer};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 // Resource names.
 pub const PROXY_CONTAINER_NAME: &str = "devconcurrent-proxy";
@@ -326,6 +327,18 @@ pub struct SidecarPlan {
     pub ports: Vec<ProxyPort>,
 }
 
+impl SidecarPlan {
+    /// Hash of everything the sidecar was built from, stamped on the sidecar
+    /// container as a label so the CLI can tell a live sidecar from one whose
+    /// plan the config has since moved past.
+    #[must_use]
+    pub fn hash(&self) -> String {
+        let json = serde_json::to_string(self).expect("a sidecar plan always serializes");
+        let digest = Sha256::digest(json.as_bytes());
+        digest.iter().map(|b| format!("{b:02x}")).collect()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -461,6 +474,45 @@ mod tests {
         let p: ProxyPort = serde_json::from_str(r#"{"host": 3000, "container": 3000}"#).unwrap();
         assert_eq!(p.host, 3000);
         assert!(!p.tls);
+    }
+
+    fn plan(hostname: &str, ports: &[(u16, u16, bool)]) -> SidecarPlan {
+        SidecarPlan {
+            hostname: hostname.to_string(),
+            ports: ports
+                .iter()
+                .map(|&(host, container, tls)| ProxyPort {
+                    ip: default_ip(),
+                    host,
+                    container,
+                    tls,
+                })
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn plan_hash_is_deterministic_and_a_valid_label_value() {
+        let plan = plan("feature.app.test", &[(443, 8080, true), (80, 8080, false)]);
+        let hash = plan.hash();
+        assert_eq!(hash, plan.hash());
+        assert_eq!(hash.len(), 64);
+        assert!(
+            hash.chars().all(|c| matches!(c, '0'..='9' | 'a'..='f')),
+            "unexpected character in {hash}",
+        );
+    }
+
+    #[test]
+    fn plan_hash_changes_when_any_input_changes() {
+        let base = plan("feature.app.test", &[(443, 8080, true)]).hash();
+        assert_ne!(base, plan("other.app.test", &[(443, 8080, true)]).hash());
+        assert_ne!(base, plan("feature.app.test", &[(443, 3000, true)]).hash());
+        assert_ne!(base, plan("feature.app.test", &[(443, 8080, false)]).hash());
+        assert_ne!(
+            base,
+            plan("feature.app.test", &[(443, 8080, true), (80, 8080, false)]).hash(),
+        );
     }
 
     #[test]

@@ -13,8 +13,10 @@ use owo_colors::OwoColorize;
 
 pub(crate) mod gatherer;
 pub(crate) mod render;
+pub(crate) mod report;
 
 pub(crate) use gatherer::Gatherer;
+pub(crate) use report::Report;
 
 /// The current content of a cell.
 pub(crate) enum CellState {
@@ -30,12 +32,23 @@ pub(crate) trait CellSource: Send {
 }
 
 /// A projected value: still loading, not applicable (`-`), or a value.
-#[derive(Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default)]
 pub(crate) enum Datum<V> {
     #[default]
     Pending,
     NotApplicable,
     Value(V),
+}
+
+/// Serialized as the value itself, with both of the value-less states becoming
+/// `null` — for consumers that want the data rather than the display.
+impl<V: serde::Serialize> serde::Serialize for Datum<V> {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            Datum::Value(value) => value.serialize(serializer),
+            Datum::Pending | Datum::NotApplicable => serializer.serialize_none(),
+        }
+    }
 }
 
 #[derive(Clone, Copy)]

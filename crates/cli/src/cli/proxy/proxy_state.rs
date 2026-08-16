@@ -8,7 +8,7 @@ use sha2::{Digest, Sha256};
 use shared::{PROXY_CONFIG_DIR, PROXY_CONFIG_FILE, PROXY_CONTAINER_NAME, ProxyOptions};
 
 use super::PROXY_IMAGE;
-use crate::config::{Config, Project, ProxyGlobal};
+use crate::config::{Config, Project, ProjectName, ProxyGlobal};
 use crate::devcontainer::DevcontainerConfig;
 use crate::state::State;
 use crate::workspace::Workspace;
@@ -20,6 +20,9 @@ pub(crate) struct ProxyState {
     pub(crate) docker: Docker,
     pub(crate) config: ProxyGlobal,
     pub(crate) options: BTreeMap<String, ProxyOptions>,
+    /// The project the command was invoked for. The proxy serves all of them,
+    /// so this only narrows what we *report* on.
+    pub(crate) project: ProjectName,
 }
 
 impl ProxyState {
@@ -29,12 +32,14 @@ impl ProxyState {
     ) -> Result<Self> {
         let config = Config::load()?;
         let state = State::new(project, &config).await?;
+        let project = state.project_name.clone();
         let workspace = state.resolve_workspace(workspace).await.ok();
-        Self::from_workspace(&config, workspace.as_ref()).await
+        Self::from_workspace(&config, project, workspace.as_ref()).await
     }
 
     pub(crate) async fn from_workspace(
         config: &Config,
+        project: ProjectName,
         workspace: Option<&Workspace<'_>>,
     ) -> Result<Self> {
         // Reuse the docker connection the workspace already opened, if any.
@@ -63,6 +68,7 @@ impl ProxyState {
             docker,
             config: config.proxy.clone(),
             options,
+            project,
         })
     }
 

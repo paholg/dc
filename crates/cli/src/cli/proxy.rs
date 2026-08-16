@@ -1,27 +1,22 @@
-use std::collections::BTreeMap;
-use std::net::{IpAddr, Ipv4Addr};
 use std::sync::LazyLock;
 use std::time::Duration;
 
 use clap::{Args, Subcommand};
 use clap_complete::engine::ArgValueCompleter;
 use color_eyre::owo_colors::OwoColorize;
-use docker::{
-    ContainerStatus, Docker, PROJECT_LABEL, PROXY_CONFIG_HASH_LABEL, PROXY_GROUP_LABEL,
-    PROXY_LABEL, PROXY_SERVICE_LABEL, PROXY_SIDECAR_LABEL, WORKSPACE_LABEL,
-};
+use docker::{Docker, PROXY_CONFIG_HASH_LABEL, PROXY_GROUP_LABEL, PROXY_LABEL};
 use eyre::{Result, WrapErr};
 use shared::{
     ENV_CA_DIR, ENV_DNS_PORT, PROXY_CA_DIR, PROXY_CONFIG_DIR, PROXY_CONFIG_VOLUME,
-    PROXY_CONTAINER_NAME, ProxyService,
+    PROXY_CONTAINER_NAME,
 };
-use tokio::net::UdpSocket;
 
 use crate::complete::complete_workspace;
 use crate::run::{Runnable, Runner};
-use crate::table::{Align, ColumnDef, TableBuilder, text};
 
+mod dns;
 mod proxy_state;
+mod status;
 pub(crate) use proxy_state::ProxyState;
 
 /// OCI image used by the proxy container.
@@ -29,14 +24,6 @@ const PROXY_IMAGE_NAME: &str = "ghcr.io/paholg/devconcurrent-proxy";
 
 /// We keep the proxy and CLI versions in sync, so using the CLI version here is fine.
 const PROXY_IMAGE_TAG: &str = env!("CARGO_PKG_VERSION");
-
-/// Host address the DNS port is published on.
-const LISTEN_IP: IpAddr = IpAddr::V4(Ipv4Addr::LOCALHOST);
-
-/// Name queried to check that the proxy is answering; it resolves to nothing.
-const PROBE_NAME: &str = "readiness-probe.devconcurrent.test";
-const PROBE_TIMEOUT: Duration = Duration::from_millis(100);
-const DNS_HEADER_LEN: usize = 12;
 
 /// How long the proxy gets to answer a query after being started. Generous:
 /// before it binds its sockets it adopts every running service container, which
@@ -58,8 +45,8 @@ enum ProxyCommands {
     Up(ProxyArgs),
     /// Stop and remove the proxy
     Down,
-    /// View the current proxy status
-    Status(ProxyArgs),
+    /// Check that every configured hostname and port is reachable
+    Status(status::StatusArgs),
 }
 
 #[derive(Debug, Args)]
@@ -79,8 +66,8 @@ impl Proxy {
                 proxy_up(&proxy).await
             }
             ProxyCommands::Status(args) => {
-                let proxy = ProxyState::resolve(project, args.workspace).await?;
-                proxy_status(&proxy).await
+                let proxy = ProxyState::resolve(project, args.workspace()).await?;
+                status::run(&proxy, &args).await
             }
             ProxyCommands::Down => proxy_down().await,
         }
@@ -195,182 +182,6 @@ async fn proxy_down() -> Result<()> {
     Ok(())
 }
 
-async fn proxy_status(proxy: &ProxyState) -> Result<()> {
-    match proxy.docker.inspect_container(PROXY_CONTAINER_NAME).await {
-        Ok(d) if d.state.running => {
-            println!(
-                "proxy: {} (image={}, dns port={})",
-                "running".green(),
-                d.config.image,
-                proxy.config.port,
-            );
-        }
-        Ok(d) => {
-            println!(
-                "proxy: {} ({}, image={})",
-                "not running".red(),
-                d.state.status,
-                d.config.image,
-            );
-        }
-        Err(docker::Error::NotFound) => {
-            println!("proxy: {}", "not present".red());
-            return Ok(());
-        }
-        Err(e) => return Err(e).wrap_err("inspect proxy"),
-    }
-
-    let sidecars = proxy
-        .docker
-        .list_containers()
-        .all(true)
-        .with_label(PROXY_SIDECAR_LABEL, "true")
-        .call()
-        .await
-        .wrap_err("list sidecars")?;
-
-    if sidecars.is_empty() {
-        println!();
-        println!("no sidecars running");
-        return Ok(());
-    }
-
-    // project -> workspace -> sorted service rows
-    let mut grouped: BTreeMap<String, BTreeMap<String, Vec<ServiceRow>>> = BTreeMap::new();
-    for sc in sidecars {
-        let project = sc.labels.get(PROJECT_LABEL).cloned().unwrap_or_default();
-        let workspace = sc.labels.get(WORKSPACE_LABEL).cloned().unwrap_or_default();
-        let service = sc
-            .labels
-            .get(PROXY_SERVICE_LABEL)
-            .cloned()
-            .unwrap_or_default();
-        let opts = proxy.options.get(&project);
-        let svc_cfg = opts.and_then(|o| o.services.get(&service)).cloned();
-        let domain = opts
-            .and_then(|o| o.render_hostname(&project, &workspace, &service, workspace == project));
-        grouped
-            .entry(project)
-            .or_default()
-            .entry(workspace)
-            .or_default()
-            .push(ServiceRow {
-                service,
-                domain,
-                proxy: sc.state,
-                container_id: sc.id,
-                ports: svc_cfg,
-            });
-    }
-    for workspaces in grouped.values_mut() {
-        for rows in workspaces.values_mut() {
-            rows.sort_by(|a, b| a.service.cmp(&b.service));
-        }
-    }
-
-    for (project, workspaces) in &grouped {
-        println!();
-        println!("project: {}", project.bold());
-        print!("{}", proxy_table(workspaces));
-    }
-    Ok(())
-}
-
-struct ServiceRow {
-    service: String,
-    domain: Option<String>,
-    proxy: ContainerStatus,
-    container_id: String,
-    ports: Option<ProxyService>,
-}
-
-/// One row of the proxy table; `workspace` is blank on all but the first row of
-/// each workspace group.
-struct ProxyRow {
-    workspace: String,
-    service: String,
-    domain: Option<String>,
-    status: ContainerStatus,
-    container_id: String,
-    ports: Option<ProxyService>,
-}
-
-fn proxy_table(workspaces: &BTreeMap<String, Vec<ServiceRow>>) -> String {
-    let mut rows: Vec<ProxyRow> = Vec::new();
-    for (workspace, services) in workspaces {
-        for (i, sc) in services.iter().enumerate() {
-            rows.push(ProxyRow {
-                workspace: if i == 0 {
-                    workspace.clone()
-                } else {
-                    String::new()
-                },
-                service: sc.service.clone(),
-                domain: sc.domain.clone(),
-                status: sc.proxy,
-                container_id: sc.container_id.clone(),
-                ports: sc.ports.clone(),
-            });
-        }
-    }
-
-    [
-        ColumnDef::new("WORKSPACE", Align::Left, |r: &ProxyRow| {
-            text(r.workspace.clone())
-        }),
-        ColumnDef::new("SERVICE", Align::Left, |r: &ProxyRow| {
-            text(r.service.clone())
-        }),
-        ColumnDef::new("DOMAIN", Align::Left, |r: &ProxyRow| {
-            text(fmt_domain(r.domain.as_deref()))
-        }),
-        ColumnDef::new("STATUS", Align::Left, |r: &ProxyRow| {
-            text(fmt_status(r.status))
-        }),
-        ColumnDef::new("CONTAINER", Align::Left, |r: &ProxyRow| {
-            text(short_id(&r.container_id))
-        }),
-        ColumnDef::new("PORTS", Align::Left, |r: &ProxyRow| {
-            text(fmt_ports(r.ports.as_ref()))
-        }),
-    ]
-    .into_iter()
-    .collect::<TableBuilder<ProxyRow>>()
-    .build(&rows, false)
-    .rendered()
-}
-
-fn fmt_domain(domain: Option<&str>) -> String {
-    match domain {
-        Some(d) if !d.is_empty() => d.to_string(),
-        _ => "-".dimmed().to_string(),
-    }
-}
-
-fn short_id(id: &str) -> String {
-    id.chars().take(12).collect()
-}
-
-fn fmt_status(status: ContainerStatus) -> String {
-    match status {
-        ContainerStatus::Running => status.green().to_string(),
-        ContainerStatus::Exited | ContainerStatus::Dead => status.red().to_string(),
-        _ => status.yellow().to_string(),
-    }
-}
-
-fn fmt_ports(svc: Option<&ProxyService>) -> String {
-    match svc {
-        Some(svc) if !svc.ports.is_empty() => svc
-            .ports
-            .iter()
-            .map(|p| p.host.to_string())
-            .collect::<Vec<_>>()
-            .join(", "),
-        _ => "-".dimmed().to_string(),
-    }
-}
-
 /// Wait for the proxy to answer DNS queries.
 ///
 /// Neither of the cheap signals means ready: docker reports the container
@@ -393,25 +204,10 @@ async fn wait_for_ready(docker: &Docker, id: &str, port: u16) -> Result<()> {
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
 
-    let socket = UdpSocket::bind((LISTEN_IP, 0))
-        .await
-        .wrap_err("bind dns probe socket")?;
-    socket
-        .connect((LISTEN_IP, port))
-        .await
-        .wrap_err("connect dns probe socket")?;
-
-    let query = dns_query(rand::random(), PROBE_NAME);
-    let mut response = [0u8; 512];
     loop {
-        // Errors here are all "not up yet": the proxy drops the packet, or
+        // A failure here is just "not up yet": the proxy drops the packet, or
         // docker's forwarder rejects it because nothing is listening behind it.
-        if socket.send(&query).await.is_ok()
-            && let Ok(Ok(len)) =
-                tokio::time::timeout(PROBE_TIMEOUT, socket.recv(&mut response)).await
-            && len >= DNS_HEADER_LEN
-            && response[..2] == query[..2]
-        {
+        if dns::is_answering(port).await {
             return Ok(());
         }
         if std::time::Instant::now() >= deadline {
@@ -420,24 +216,6 @@ async fn wait_for_ready(docker: &Docker, id: &str, port: u16) -> Result<()> {
         // A failed send returns immediately, so pace the retries ourselves.
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
-}
-
-/// A minimal `<name> A IN` query packet, used to check that the proxy is
-/// answering. The name need not exist; an NXDOMAIN is just as good an answer.
-fn dns_query(id: u16, name: &str) -> Vec<u8> {
-    let mut query = Vec::new();
-    query.extend_from_slice(&id.to_be_bytes());
-    query.extend_from_slice(&[0x01, 0x00]); // standard query, recursion desired
-    query.extend_from_slice(&[0x00, 0x01]); // one question
-    query.extend_from_slice(&[0x00; 6]); // no answer, authority, or additional records
-    for label in name.split('.') {
-        query.push(u8::try_from(label.len()).expect("PROBE_NAME has short labels"));
-        query.extend_from_slice(label.as_bytes());
-    }
-    query.push(0); // root label
-    query.extend_from_slice(&[0x00, 0x01]); // qtype: A
-    query.extend_from_slice(&[0x00, 0x01]); // qclass: IN
-    query
 }
 
 async fn create_proxy_stopped(proxy: &ProxyState) -> Result<String> {
@@ -450,8 +228,8 @@ async fn create_proxy_stopped(proxy: &ProxyState) -> Result<String> {
         .docker
         .create_container(PROXY_CONTAINER_NAME)
         .image(&PROXY_IMAGE)
-        .with_udp_port_binding(proxy.config.port, LISTEN_IP, proxy.config.port)
-        .with_tcp_port_binding(proxy.config.port, LISTEN_IP, proxy.config.port)
+        .with_udp_port_binding(proxy.config.port, dns::LISTEN_IP, proxy.config.port)
+        .with_tcp_port_binding(proxy.config.port, dns::LISTEN_IP, proxy.config.port)
         .with_label(PROXY_LABEL, "true")
         .with_label(PROXY_GROUP_LABEL, "true")
         .with_label(PROXY_CONFIG_HASH_LABEL, proxy.config_hash())
@@ -466,31 +244,4 @@ async fn create_proxy_stopped(proxy: &ProxyState) -> Result<String> {
     }
 
     builder.call().await.wrap_err("create proxy container")
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn dns_query_is_a_well_formed_question() {
-        let query = dns_query(0xbeef, "foo.test");
-        assert_eq!(
-            query,
-            [
-                0xbe, 0xef, // id
-                0x01, 0x00, // flags
-                0x00, 0x01, // qdcount
-                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // an/ns/ar count
-                3, b'f', b'o', b'o', 4, b't', b'e', b's', b't', 0, // qname
-                0x00, 0x01, // qtype: A
-                0x00, 0x01, // qclass: IN
-            ]
-        );
-    }
-
-    #[test]
-    fn probe_name_labels_fit_in_a_length_byte() {
-        dns_query(0, PROBE_NAME);
-    }
 }

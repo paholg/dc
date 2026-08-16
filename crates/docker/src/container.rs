@@ -44,6 +44,11 @@ where
 #[serde(rename_all = "PascalCase")]
 pub struct ContainerDetails {
     pub id: String,
+    /// Id of the image the container is *running*, which is not the same thing
+    /// as [`ContainerConfig::image`]: that is the reference as given at create
+    /// time, and the tag it names may since have moved to a newer image.
+    #[serde(default)]
+    pub image: String,
     pub created: String,
     pub state: ContainerState,
     pub config: ContainerConfig,

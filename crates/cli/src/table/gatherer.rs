@@ -26,6 +26,22 @@ impl<S> Clone for Gatherer<S> {
     }
 }
 
+/// The write half of a [`Gatherer::progressive`] source: a task's handle for
+/// publishing its snapshot as it fills in.
+pub(crate) struct Publisher<S> {
+    tx: watch::Sender<Arc<S>>,
+    current: S,
+}
+
+impl<S: Clone + Send + Sync + 'static> Publisher<S> {
+    /// Mutate the snapshot and publish it. Every cell reading this gatherer
+    /// picks up the change on its next read.
+    pub(crate) fn update(&mut self, f: impl FnOnce(&mut S)) {
+        f(&mut self.current);
+        let _ = self.tx.send(Arc::new(self.current.clone()));
+    }
+}
+
 impl<S: Default + Send + Sync + 'static> Gatherer<S> {
     /// Poll `fetch` every `period`, publishing each snapshot. First poll fires
     /// immediately; the task ends once every derived cell is dropped.
@@ -46,6 +62,33 @@ impl<S: Default + Send + Sync + 'static> Gatherer<S> {
             }
         });
         Gatherer { rx }
+    }
+
+    /// A gatherer fed by a task that publishes as it goes, rather than by a
+    /// poll loop. For a sequence of dependent steps (resolve, then connect,
+    /// then handshake, …) where each one's result should reach the screen as
+    /// soon as it's known instead of at the end.
+    pub(crate) fn progressive<F, Fut>(run: F) -> Self
+    where
+        S: Clone,
+        F: FnOnce(Publisher<S>) -> Fut + Send + 'static,
+        Fut: std::future::Future<Output = ()> + Send + 'static,
+    {
+        let (tx, rx) = watch::channel(Arc::new(S::default()));
+        tokio::spawn(async move {
+            run(Publisher {
+                tx,
+                current: S::default(),
+            })
+            .await;
+        });
+        Gatherer { rx }
+    }
+
+    /// The latest published snapshot. For callers that consume the values
+    /// directly rather than rendering them.
+    pub(crate) fn snapshot(&self) -> Arc<S> {
+        self.rx.borrow().clone()
     }
 
     /// A gatherer that recomputes each time this one publishes, not on its own

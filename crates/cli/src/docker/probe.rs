@@ -95,7 +95,10 @@ fn merge_paths(shell_path: &str, container_path: &str) -> String {
 
 /// Read the user's login shell inside the container: `$SHELL` if set, otherwise the shell field
 /// from `/etc/passwd`, otherwise `/bin/sh`.
-async fn resolve_user_shell(container_id: &str, user: Option<&str>) -> eyre::Result<String> {
+pub(crate) async fn resolve_user_shell(
+    container_id: &str,
+    user: Option<&str>,
+) -> eyre::Result<String> {
     let script = r#"printf %s "${SHELL:-$(getent passwd "$(id -un)" 2>/dev/null | cut -d: -f7)}""#;
     let output = run_in_container(container_id, user, &["sh", "-c", script]).await?;
     let shell = String::from_utf8(output)?.trim().to_string();

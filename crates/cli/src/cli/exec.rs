@@ -11,7 +11,6 @@ use crate::cli::State;
 use crate::complete::complete_workspace;
 use crate::config::Config;
 use crate::docker::probe;
-use crate::run::cmd::Cmd;
 use crate::state::DevcontainerState;
 
 /// Exec into a running devcontainer
@@ -21,7 +20,7 @@ pub(crate) struct Exec {
     #[arg(short, long, add = ArgValueCompleter::new(complete_workspace))]
     workspace: Option<String>,
 
-    /// command to run [default: Configured defaultExec]
+    /// command to run [default: the container user's shell]
     #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
     cmd: Vec<String>,
 }
@@ -70,34 +69,25 @@ impl Exec {
             remote_env.insert(key.clone(), value);
         }
 
-        let default_exec = devcontainer
-            .devconcurrent()
-            .default_exec
-            .as_ref()
-            .map(|cmd| cmd.render("defaultExec", &context))
-            .transpose()?;
-
         exec_interactive(
             container_id,
             devcontainer,
             &remote_env,
             &self.cmd,
             user.as_deref(),
-            default_exec.as_ref(),
         )
+        .await
     }
 }
 
-/// `user` and `default_exec` are the rendered `remoteUser` and
-/// `customizations.devconcurrent.defaultExec`; the latter is used when no
-/// command is given on the CLI.
-pub(crate) fn exec_interactive(
+/// `user` is the rendered `remoteUser`. With no command on the CLI, we run the
+/// container user's shell.
+pub(crate) async fn exec_interactive(
     container_id: &str,
     devcontainer: &DevcontainerState,
     remote_env: &IndexMap<String, Option<String>>,
     cmd_args: &[String],
     user: Option<&str>,
-    default_exec: Option<&Cmd>,
 ) -> eyre::Result<()> {
     let mut cmd = std::process::Command::new("docker");
     cmd.arg("exec");
@@ -121,11 +111,12 @@ pub(crate) fn exec_interactive(
     cmd.arg(container_id);
 
     if cmd_args.is_empty() {
-        cmd.args(
-            default_exec
-                .ok_or_else(|| eyre!("no command provided and no default configured"))?
-                .as_args(),
-        );
+        // The probe usually hands us `SHELL` already; only ask the container when it doesn't.
+        let default_shell = match remote_env.get("SHELL").and_then(Option::as_deref) {
+            Some(shell) if !shell.is_empty() => shell.to_string(),
+            _ => probe::resolve_user_shell(container_id, user).await?,
+        };
+        cmd.arg(default_shell);
     } else {
         cmd.args(cmd_args);
     }

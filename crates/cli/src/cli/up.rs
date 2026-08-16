@@ -40,7 +40,7 @@ pub(crate) struct Up {
     #[arg(add = ArgValueCompleter::new(complete_workspace))]
     workspace: Option<String>,
 
-    /// Exec once up with the given command [default: configured defaultExec]
+    /// Exec once up with the given command [default: the container user's shell]
     #[arg(short = 'x', long, num_args = 0.., allow_hyphen_values = true)]
     exec: Option<Vec<String>>,
 }
@@ -199,20 +199,7 @@ impl Up {
 
         // Interactive exec if requested
         if let Some(cmd_args) = &self.exec {
-            let default_exec = devcontainer
-                .devconcurrent()
-                .default_exec
-                .as_ref()
-                .map(|cmd| cmd.render("defaultExec", &context))
-                .transpose()?;
-            exec_interactive(
-                &container_id,
-                devcontainer,
-                remote_env,
-                cmd_args,
-                user,
-                default_exec.as_ref(),
-            )?;
+            exec_interactive(&container_id, devcontainer, remote_env, cmd_args, user).await?;
         }
 
         Ok(())

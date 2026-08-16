@@ -125,7 +125,8 @@ impl Up {
         let workdir = Some(devcontainer.workspace_folder.as_path());
 
         let container =
-            probe::ContainerData::inspect(&devcontainer.docker.client, &container_id).await?;
+            probe::ContainerData::inspect(&devcontainer.docker().await?.client, &container_id)
+                .await?;
         let context = devcontainer
             .context(&workspace.path)
             .with_container_env(&container.env);

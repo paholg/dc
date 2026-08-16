@@ -76,7 +76,11 @@ impl<'a> Workspace<'a> {
         &self,
         devcontainer: &DevcontainerState,
     ) -> eyre::Result<WorkspaceDevcontainer> {
-        let containers = devcontainer.docker.workspace_container_info(self).await?;
+        let containers = devcontainer
+            .docker()
+            .await?
+            .workspace_container_info(self)
+            .await?;
         Ok(WorkspaceDevcontainer { containers })
     }
 }

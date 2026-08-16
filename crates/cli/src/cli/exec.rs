@@ -42,7 +42,8 @@ impl Exec {
         }
         let container_id = workspace_full.service_container_id()?;
         let container =
-            probe::ContainerData::inspect(&devcontainer.docker.client, container_id).await?;
+            probe::ContainerData::inspect(&devcontainer.docker().await?.client, container_id)
+                .await?;
         let context = devcontainer
             .context(&workspace.path)
             .with_container_env(&container.env);

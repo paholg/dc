@@ -6,7 +6,7 @@ use clap_complete::engine::CompletionCandidate;
 
 use crate::cli::{Cli, Commands};
 use crate::config::Config;
-use crate::helpers::{SHELL_ENV, SHELL_FD};
+use crate::helpers::SHELL_FD;
 use crate::worktree;
 
 fn is_completion_candidate(prefix: &str, candidate: &str) -> bool {
@@ -109,16 +109,17 @@ fn compose_prior_args() -> eyre::Result<Vec<String>> {
 /// This lets subcommands like `go` cause a `cd` to take effect, without the
 /// wrapper needing to know which subcommands do what.
 ///
-/// It also names itself via `SHELL_ENV`, so subcommands that emit shell syntax
-/// — `show env --export` — know which dialect to write.
-pub(crate) fn shell_function(shell: Shell, binary: &str) -> eyre::Result<String> {
+///
+/// When `export_env` is set, the returned script also installs a prompt hook;
+/// see [`env_hook`].
+pub(crate) fn shell_function(shell: Shell, binary: &str, export_env: bool) -> eyre::Result<String> {
     let quoted = shlex::try_quote(binary)?;
     let function = match shell {
         Shell::Bash | Shell::Zsh => format!(
             r#"
 dc() {{
     local cmds rc
-    {{ cmds=$({SHELL_FD}=3 {SHELL_ENV}={shell} {quoted} "$@" 3>&1 1>&4); rc=$?; }} 4>&1
+    {{ cmds=$({SHELL_FD}=3 {quoted} "$@" 3>&1 1>&4); rc=$?; }} 4>&1
     [ -n "$cmds" ] && eval "$cmds"
     return $rc
 }}
@@ -128,7 +129,6 @@ dc() {{
             r#"
 function dc --wraps {quoted}
     set -lx {SHELL_FD} 3
-    set -lx {SHELL_ENV} {shell}
     set -l tmp (mktemp)
     {quoted} $argv 3>$tmp
     set -l rc $status
@@ -145,5 +145,53 @@ end
         ),
         shell => eyre::bail!("unsupported shell {shell}"),
     };
+
+    if export_env {
+        return Ok(function + &env_hook(shell));
+    }
     Ok(function)
+}
+
+/// A prompt hook that runs `dc show env --export` on every prompt, keeping the
+/// variables from `customizations.devconcurrent.env` in step with whichever
+/// workspace you're standing in.
+///
+/// The shell is baked in here rather than sniffed at runtime: this text is
+/// generated per shell already, so it knows.
+///
+/// Only called for the shells [`shell_function`] supports.
+fn env_hook(shell: Shell) -> String {
+    match shell {
+        // Prepend, so the hook runs before anything that draws the prompt.
+        // The `case` keeps re-sourcing from stacking up copies.
+        Shell::Bash => format!(
+            r#"
+_devconcurrent_env() {{
+    dc show env --export={shell}
+}}
+case "${{PROMPT_COMMAND-}}" in
+    *_devconcurrent_env*) ;;
+    *) PROMPT_COMMAND="_devconcurrent_env${{PROMPT_COMMAND:+; $PROMPT_COMMAND}}" ;;
+esac
+"#
+        ),
+        // `add-zsh-hook` already refuses to register the same function twice.
+        Shell::Zsh => format!(
+            r#"
+_devconcurrent_env() {{
+    dc show env --export={shell}
+}}
+autoload -Uz add-zsh-hook
+add-zsh-hook precmd _devconcurrent_env
+"#
+        ),
+        // Redefining a function replaces the old one, hook and all.
+        _ => format!(
+            r#"
+function _devconcurrent_env --on-event fish_prompt
+    dc show env --export={shell}
+end
+"#
+        ),
+    }
 }

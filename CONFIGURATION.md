@@ -27,6 +27,11 @@ Here are the options:
   * `port` [default: 43770] - the port the proxy listens.
   * `caRoot` [optional] - The path given by `mkcert -CAROOT`.
 
+* `shell` - configure what shell setup installs.
+  * `exportEnv` [default: `false`] - also register a prompt hook, so the
+    variables from `customizations.devconcurrent.env` follow you between
+    workspaces. See the [README](README.md#workspace-variables).
+
 * `projects.FOO` - configure project FOO.
   * `path` - the location of the git repository.
   * `worktreeFolder` - the directory where devconcurrent will place worktrees;
@@ -99,7 +104,8 @@ Here are the options that can go in `customizations.devconcurrent`:
         proxy, performing TLS termination so it can serve `https`. If `false`,
         the proxy just forwards raw bytes, acting as a simple port-forwarder.
 * `env.FOO` - a handlebars template for shell variable `FOO`, rendered by
-  `dc show env` and set in your shell by `dc show env --export`. `{{hostname 'bar'}}`
+  `dc show env` and set in your shell by `dc show env --export=SHELL` (or on
+  every prompt, via `shell.exportEnv` above). `{{hostname 'bar'}}`
   expands to compose service `bar`'s proxied hostname; `root`, `project` and
   `workspace` are available as plain variables. Unlike hostname templates, these
   render strictly: an unknown variable is an error rather than an empty string.

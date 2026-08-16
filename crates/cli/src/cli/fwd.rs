@@ -40,7 +40,7 @@ impl Fwd {
         match self.command {
             Some(FwdCommands::Stop) => {
                 let devcontainer = state.try_devcontainer()?;
-                remove_sidecars(&state, &devcontainer.docker.client).await
+                remove_sidecars(&state, &devcontainer.docker().await?.client).await
             }
             None => {
                 let workspace = state.resolve_workspace(self.workspace).await?;
@@ -55,7 +55,7 @@ pub(crate) async fn forward(
     devcontainer: &DevcontainerState,
     workspace: &Workspace<'_>,
 ) -> eyre::Result<()> {
-    remove_sidecars(workspace.state, &devcontainer.docker.client).await?;
+    remove_sidecars(workspace.state, &devcontainer.docker().await?.client).await?;
 
     let ws = workspace.devcontainer(devcontainer).await?;
     let cid = ws.service_container_id()?;
@@ -75,20 +75,29 @@ pub(crate) async fn forward(
 
     if !available.is_empty() {
         // Get container's network name for the outer sidecar
-        let network_name = container_network(&devcontainer.docker.client, cid).await?;
+        let network_name = container_network(&devcontainer.docker().await?.client, cid).await?;
 
-        devcontainer.docker.client.ensure_image(SOCAT_IMAGE).await?;
+        devcontainer
+            .docker()
+            .await?
+            .client
+            .ensure_image(SOCAT_IMAGE)
+            .await?;
 
         let volume_name = format!("devconcurrent-fwd-{}", workspace.compose_project_name());
 
-        let mut create = devcontainer.docker.client.create_volume(&volume_name);
+        let mut create = devcontainer
+            .docker()
+            .await?
+            .client
+            .create_volume(&volume_name);
         for (key, value) in workspace.docker_fwd_labels() {
             create = create.with_label(key.to_owned(), value.to_owned());
         }
         create.call().await?;
 
         create_inner_sidecar(
-            &devcontainer.docker.client,
+            &devcontainer.docker().await?.client,
             workspace,
             &workspace.compose_project_name(),
             cid,
@@ -97,7 +106,7 @@ pub(crate) async fn forward(
         )
         .await?;
         create_outer_sidecar(
-            &devcontainer.docker.client,
+            &devcontainer.docker().await?.client,
             workspace,
             &workspace.compose_project_name(),
             cid,

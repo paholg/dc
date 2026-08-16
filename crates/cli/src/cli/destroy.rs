@@ -96,7 +96,7 @@ impl Runnable for Cleanup<'_> {
             remove_override_file(self.workspace);
 
             // Remove any port-forward sidecars targeting this workspace
-            let client = &devcontainer.docker.client;
+            let client = &devcontainer.docker().await?.client;
             if let Ok(summaries) = client
                 .list_containers()
                 .all(true)

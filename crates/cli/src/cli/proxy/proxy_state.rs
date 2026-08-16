@@ -39,7 +39,7 @@ impl ProxyState {
     ) -> Result<Self> {
         // Reuse the docker connection the workspace already opened, if any.
         let docker = match workspace.and_then(|w| w.state.devcontainer.as_ref()) {
-            Some(dc) => dc.docker.client.clone(),
+            Some(dc) => dc.docker().await?.client.clone(),
             None => Docker::connect().await.wrap_err("connect to docker")?,
         };
 

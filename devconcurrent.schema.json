@@ -18,6 +18,12 @@
         "port": 43770,
         "caRoot": null
       }
+    },
+    "shell": {
+      "$ref": "#/$defs/ShellGlobal",
+      "default": {
+        "exportEnv": false
+      }
     }
   },
   "x-tombi-toml-version": "v1.1.0",
@@ -781,6 +787,17 @@
             "null"
           ],
           "default": null
+        }
+      }
+    },
+    "ShellGlobal": {
+      "description": "Global shell-integration settings, applied when you source\n`COMPLETE=<shell> devconcurrent`.",
+      "type": "object",
+      "properties": {
+        "exportEnv": {
+          "description": "Also register a prompt hook that keeps the variables from\n`customizations.devconcurrent.env` in sync with the workspace you are\nstanding in, as though you ran `dc show env --export` yourself.\n\nDefault: false",
+          "type": "boolean",
+          "default": false
         }
       }
     }

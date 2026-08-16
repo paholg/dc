@@ -88,7 +88,12 @@ fn shell_function(shell: Shell) -> eyre::Result<String> {
         .unwrap_or_else(|| "devconcurrent".into());
     let bin = bin_os.to_string_lossy();
 
-    let func = complete::shell_function(shell, &bin)?;
+    // A missing or broken config must not cost you the `dc` function at shell
+    // startup; the opt-in hook just stays off, and the next real command will
+    // report the problem.
+    let export_env = crate::config::Config::load().is_ok_and(|config| config.shell.export_env);
+
+    let func = complete::shell_function(shell, &bin, export_env)?;
     Ok(func)
 }
 

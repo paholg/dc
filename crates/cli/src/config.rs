@@ -64,6 +64,21 @@ pub(crate) struct Config {
     pub(crate) projects: IndexMap<ProjectName, Project>,
     #[serde(default)]
     pub(crate) proxy: ProxyGlobal,
+    #[serde(default)]
+    pub(crate) shell: ShellGlobal,
+}
+
+/// Global shell-integration settings, applied when you source
+/// `COMPLETE=<shell> devconcurrent`.
+#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase", default)]
+pub(crate) struct ShellGlobal {
+    /// Also register a prompt hook that keeps the variables from
+    /// `customizations.devconcurrent.env` in sync with the workspace you are
+    /// standing in, as though you ran `dc show env --export` yourself.
+    ///
+    /// Default: false
+    pub(crate) export_env: bool,
 }
 
 /// Global user proxy settings.

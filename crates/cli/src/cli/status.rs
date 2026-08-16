@@ -138,7 +138,7 @@ impl Status {
         let (table, workspace) = match state.devcontainer.as_ref() {
             None => (self.git_only_table(&state).await?, None),
             Some(dc) => {
-                let docker = dc.docker.clone();
+                let docker = dc.docker().await?.clone();
                 match self.workspace.clone() {
                     None => (self.workspace_table(&state, docker).await?, None),
                     Some(name) => {

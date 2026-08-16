@@ -413,7 +413,7 @@ hostname while leaving the rest alone:
 
 #### Workspace variables
 
-TODO: Write instructions here.
+You can configure variables for your project in `customizations.devconcurrent.env`:
 
 ```json
 {
@@ -439,28 +439,35 @@ APP_URL       https://feature3.app.test
 DATABASE_URL  postgres://postgres:postgres@feature3.postgres.test:5432/db_feature3
 ```
 
-And `dc show env --export` sets them in your shell, which you can register with
+If you'd like them to be automatically set when rendering your prompt, enable it
+in in `config.toml`:
 
-TODO
-
-```sh
-# bash, in .bashrc
-PROMPT_COMMAND='dc show env --export'
-
-# fish, in config.fish
-function dc_env --on-event fish_prompt
-    dc show env --export
-end
+```toml
+shell.exportEnv = true
 ```
 
-This relies on the `dc` shell function from [Shell Setup](#shell-setup). Without
-it, name your shell explicitly and `eval` the result yourself:
+[Shell Setup](#shell-setup) then registers a prompt hook alongside the `dc`
+function, and your variables track whichever workspace you're standing in.mpt.
+
+You can also do it by hand, which is all the hook does. `--export` takes the
+shell to write for:
 
 ```sh
-eval "$(devconcurrent show env --export --shell bash)"
+dc show env --export=bash
+```
+
+That relies on the `dc` shell function to apply the result. Without it, `eval`
+the output yourself:
+
+```sh
+eval "$(devconcurrent show env --export=bash)"
 ```
 
 Note that these variables are set in your shell, on the host.
+
+If the hook seems to be doing nothing, run `dc show env` directly — the hook
+stays quiet when you're outside a workspace, but a template that fails to render
+is reported either way.
 
 ### Proxy and HTTPS
 

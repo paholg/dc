@@ -5,6 +5,7 @@ use std::{
 };
 
 use eyre::OptionExt;
+use tokio::sync::OnceCell;
 
 use crate::{
     config::{Config, Project, ProjectName},
@@ -23,7 +24,10 @@ pub(crate) struct State<'a> {
 
 pub(crate) struct DevcontainerState {
     pub(crate) config: DevcontainerConfig,
-    pub(crate) docker: Arc<DockerClient>,
+    /// Connected on first use. Reaching the daemon costs a `docker context
+    /// inspect` and a version handshake — around 14ms — which the commands
+    /// that only read configuration have no reason to pay.
+    docker: OnceCell<Arc<DockerClient>>,
     pub(crate) labels: DevcontainerLabels,
     /// `workspaceFolder` with its variables resolved. It is what
     /// `${containerWorkspaceFolder}` expands to everywhere else, so it is
@@ -32,20 +36,19 @@ pub(crate) struct DevcontainerState {
 }
 
 impl DevcontainerState {
-    async fn new(project: &Project) -> eyre::Result<Option<Self>> {
+    fn new(project: &Project) -> eyre::Result<Option<Self>> {
         let path = DevcontainerConfig::find_config(&project.path);
         let Some(config) = DevcontainerConfig::load(path.as_deref(), project)? else {
             return Ok(None);
         };
-        let docker = DockerClient::new().await?;
 
-        Self::assemble(path, config, Arc::new(docker), project.path.clone()).map(Some)
+        Self::assemble(path, config, OnceCell::new(), project.path.clone()).map(Some)
     }
 
     fn assemble(
         path: Option<PathBuf>,
         config: DevcontainerConfig,
-        docker: Arc<DockerClient>,
+        docker: OnceCell<Arc<DockerClient>>,
         local_folder: PathBuf,
     ) -> eyre::Result<Self> {
         let labels = DevcontainerLabels::new(local_folder, path);
@@ -57,6 +60,13 @@ impl DevcontainerState {
             labels,
             workspace_folder,
         })
+    }
+
+    /// Connect to the daemon, or hand back the connection we already made.
+    pub(crate) async fn docker(&self) -> eyre::Result<&Arc<DockerClient>> {
+        self.docker
+            .get_or_try_init(|| async { DockerClient::new().await.map(Arc::new) })
+            .await
     }
 
     /// A rendering context with everything but `${containerEnv:…}`, which needs
@@ -92,7 +102,7 @@ impl<'a> State<'a> {
     ) -> eyre::Result<Self> {
         let (project_name, project) = config.project(specified_project)?;
 
-        let devcontainer = DevcontainerState::new(project).await?;
+        let devcontainer = DevcontainerState::new(project)?;
 
         let working_dir = Self::resolve_working_dir(&project_name, project, devcontainer.as_ref())?;
 
@@ -245,12 +255,11 @@ impl<'a> State<'a> {
             )
         })?;
 
-        DevcontainerState::assemble(
-            path,
-            config,
-            root.docker.clone(),
-            workspace_path.to_path_buf(),
-        )
+        // Hand on the parent's connection if it has one, so a caller that
+        // loops over workspaces connects at most once.
+        let docker = OnceCell::new_with(root.docker.get().cloned());
+
+        DevcontainerState::assemble(path, config, docker, workspace_path.to_path_buf())
     }
 }
 

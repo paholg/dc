@@ -75,6 +75,21 @@
           }
         );
 
+        # The mdbook site, deployed to https://devconcurrent.paholg.com by
+        # `.github/workflows/docs.yml`.
+        docs = pkgs.stdenvNoCC.mkDerivation {
+          pname = "devconcurrent-docs";
+          inherit (crateName) version;
+          src = pkgs.lib.cleanSourceWith {
+            src = ./docs;
+            # `book` is mdbook's local build output; keep it out of the hash.
+            filter = path: type: !(type == "directory" && baseNameOf path == "book");
+          };
+          nativeBuildInputs = [ pkgs.mdbook ];
+          buildPhase = "mdbook build --dest-dir $out";
+          dontInstall = true;
+        };
+
         # OCI image for the service.
         #
         # `sidecarDir` is an empty `/etc/sidecar/` that exists at create time so
@@ -116,6 +131,7 @@
         packages = {
           default = package;
           service = servicePackage;
+          inherit docs;
         }
         // pkgs.lib.optionalAttrs pkgs.stdenv.isLinux {
           docker-service-image = dockerImage;
@@ -130,6 +146,7 @@
               cargo-nextest
               fd
               just
+              mdbook
               nodejs
               pandoc
               rumdl

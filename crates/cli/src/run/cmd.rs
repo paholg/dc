@@ -85,7 +85,11 @@ impl run::Runnable for NamedCmd<'_> {
 
     async fn run(self, _: run::Token) -> eyre::Result<()> {
         let argv = self.cmd.as_args();
-        super::run_cmd(&argv, self.dir).await
+        let what = match self.dir {
+            Some(dir) => format!("`{}` in {}", self.cmd.description(), dir.display()),
+            None => format!("`{}`", self.cmd.description()),
+        };
+        super::run_cmd(&argv, self.dir, &what).await
     }
 }
 

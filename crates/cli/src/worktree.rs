@@ -41,7 +41,7 @@ pub(crate) async fn create(
         }
 
         workspace.state.ensure_project_working_dir()?;
-        run_cmd(&args, Some(root_path)).await?;
+        run_cmd(&args, Some(root_path), "git worktree add").await?;
     }
 
     lock(workspace).await?;

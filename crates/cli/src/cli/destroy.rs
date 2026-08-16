@@ -92,7 +92,7 @@ impl Runnable for Cleanup<'_> {
             let mut down_cmd = compose_cmd(devcontainer, self.workspace)?;
             down_cmd.args(["down", "-v", "--rmi", "local", "--remove-orphans"]);
 
-            run_command(down_cmd).await?;
+            run_command(down_cmd, "docker compose down").await?;
             remove_override_file(self.workspace);
 
             // Remove any port-forward sidecars targeting this workspace
@@ -134,7 +134,7 @@ impl Runnable for Cleanup<'_> {
             worktree_cmd.arg(&self.workspace.path);
             worktree_cmd.current_dir(&self.workspace.state.project.path);
 
-            run_command(worktree_cmd).await?;
+            run_command(worktree_cmd, "git worktree remove").await?;
         }
 
         eprintln!("Removed {}", self.workspace.path.display());

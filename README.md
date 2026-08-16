@@ -88,7 +88,7 @@ place; the error names the exact path it looked for.
 Place a file like this there:
 
 ```toml
-#:schema https://raw.githubusercontent.com/paholg/devconcurrent/refs/heads/main/devconcurrent.schema.json
+#:schema https://devconcurrent.paholg.com/devconcurrent.schema.json
 
 [projects.best_project]
 path = "~/src/best"

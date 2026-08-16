@@ -5,7 +5,11 @@ authors = ["Paho Lurie-Gregg"]
 language = "en"
 src = "src"
 
+[preprocessor.tabs]
+
 [output.html]
 site-url = "/"
 git-repository-url = "https://github.com/paholg/devconcurrent"
 edit-url-template = "https://github.com/paholg/devconcurrent/edit/main/docs/{path}"
+additional-css = ["theme/tabs.css"]
+additional-js = ["theme/tabs.js"]

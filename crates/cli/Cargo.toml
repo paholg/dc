@@ -37,7 +37,7 @@ rustls-native-certs = "0.8"
 schemars = { version = "1.2.2", features = ["indexmap2", "preserve_order"] }
 serde = { workspace = true }
 serde-inline-default = "1.0.2"
-serde_json = { workspace = true, features = ["preserve_order"] }
+serde_json = { workspace = true }
 serde_path_to_error = "0.1.20"
 serde_with = { version = "3.22", features = ["schemars_1"] }
 sha2 = "0.11.0"

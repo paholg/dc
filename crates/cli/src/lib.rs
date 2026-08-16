@@ -142,3 +142,9 @@ fn shell_function(shell: Shell) -> eyre::Result<String> {
 pub fn schema() -> schemars::Schema {
     schemars::schema_for!(config::Config)
 }
+
+/// The CLI's clap definition, for the `gen` crate to document.
+#[must_use]
+pub fn cli_command() -> clap::Command {
+    Cli::command()
+}

@@ -5,6 +5,16 @@ fix: _fix check
 run *args:
     cargo run --bin devconcurrent -- {{args}}
 
+# Render VHS tapes.
+tape *names:
+    # Put the current build of `devconcurrent` in the path.
+    cargo build -q --bin devconcurrent
+    bin_dir="$(cargo metadata --format-version=1 --no-deps | jq -r .target_directory)/debug"; \
+    for tape in {{ if names == "" { "tapes/*.tape" } else { names } }}; do \
+        [ -e "$tape" ] || tape="tapes/$tape.tape"; \
+        PATH="$bin_dir:$PATH" vhs "$tape"; \
+    done
+
 # Build the book.
 docs:
     mdbook build docs
@@ -36,10 +46,14 @@ up:
     cargo upgrade -i
 
 _fix:
+    just gen
     cargo clippy --all-features --all-targets --fix --allow-staged
     cargo fmt
     tombi format
     rumdl fmt
+
+gen:
+    cargo run -q -p gen
 
 lint:
     cargo fmt --all -- --check

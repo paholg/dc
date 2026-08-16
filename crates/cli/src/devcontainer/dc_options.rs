@@ -13,34 +13,32 @@ use crate::helpers::deserialize_shell_path_opt;
 #[derive(Deserialize, Serialize, Debug, Clone, Default, JsonSchema)]
 #[serde(rename_all = "camelCase", default)]
 pub(crate) struct DcOptions {
+    /// The directory where devconcurrent will place worktrees.
     #[serde(deserialize_with = "deserialize_shell_path_opt")]
     pub(crate) worktree_folder: Option<PathBuf>,
     /// Whether to mount the project's git directory into each workspace's devcontainer.
     ///
     /// Git worktrees have a simple `.git` file that points to the actual `.git` directory. If that
-    /// directory isn't available, then no git commands will work in the worktree. By mounting it
-    /// at its original path in the devcontainer, we allow you to use `git` freely for the workspace,
-    /// both inside and out of the devcontainer.
-    ///
-    /// Defaults to true, but we use Option so it can be overridden.
+    /// directory isn't available, then no git commands will work. By mounting it at its original
+    /// path in the devcontainer, `git` should just work, both inside and out of the container.
+    // NOTE: This is an Option to support merging configs.
+    #[schemars(extend("default" = true))]
     mount_git: Option<bool>,
-    /// Reverse-proxy configuration.
-    ///
-    /// Leave empty if you don't wish to use it.
+
+    /// Configure DNS hostnames and HTTP proxy.
     pub(crate) proxy: ProxyOptions,
 
-    /// Shell variables describing the current workspace, rendered by
-    /// `dc show env`.
+    /// Define shell variables
     ///
-    /// Each value is a Handlebars template. `{{hostname 'svc'}}` expands to the
-    /// proxied hostname of compose service `svc`; `project`, `workspace` and
-    /// `root` are available as plain variables. For example:
+    /// These are rendered by `dc show env` or automatically set if `shell.exportEnv` is true.
     ///
-    /// ```json
-    /// "env": {
-    ///   "DATABASE_URL": "postgres://postgres:postgres@{{hostname 'postgres'}}:5432/db"
-    /// }
-    /// ```
+    /// The values are given by handlebars templates with the following:
+    ///   * The `hostname` helper gives the hostname for a service.
+    ///   * The following variables are populated: `project`, `workspace`, and `root`.
+    #[schemars(example = serde_json::json!({
+        "BASE_URL": "{{ hostname 'app' }}",
+        "DATABASE_URL": "postgres://postgres:postgres@{{hostname 'postgres'}}:5432/db"
+    }))]
     pub(crate) env: IndexMap<EnvVarName, Template>,
 }
 

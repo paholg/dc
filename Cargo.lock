@@ -3913,6 +3913,7 @@ name = "shared"
 version = "0.0.0"
 dependencies = [
  "handlebars",
+ "http",
  "indexmap 2.14.0",
  "schemars 1.2.2",
  "serde",

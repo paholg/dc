@@ -20,7 +20,7 @@ use rustls::pki_types::pem::PemObject;
 use rustls::pki_types::{CertificateDer, ServerName};
 use rustls::{ClientConfig, RootCertStore};
 use serde::Serialize;
-use shared::{ENV_CA_DIR, HTTP_PORT, HTTPS_PORT, PROXY_CONTAINER_NAME};
+use shared::{ENV_CA_DIR, HTTP_PORT, HTTPS_PORT, PROXY_CONTAINER_NAME, navigation};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio_rustls::TlsConnector;
@@ -856,8 +856,9 @@ async fn check_http_app(
             "no HTTP response on port {HTTP_PORT}: {e}; check that container port \
              {container_port} is serving"
         )),
-        Ok(status) if expect_redirect && status == 307 => {
-            Check::ok_with("307").with_detail(format!("redirects to https://{hostname}"))
+        Ok(status) if expect_redirect && status == navigation::REDIRECT_STATUS => {
+            Check::ok_with(status.to_string())
+                .with_detail(format!("redirects to https://{hostname}"))
         }
         Ok(status) if expect_redirect => Check::fail(format!(
             "port {HTTP_PORT} answered {status} instead of redirecting to https; \
@@ -901,10 +902,17 @@ async fn http_status<S: AsyncRead + AsyncWrite + Unpin>(
     host: &str,
     kind: RequestKind,
 ) -> Result<u16> {
-    // Matches what the sidecar looks for in `redirect_target_for`.
+    // Built from the same constants the sidecar matches on, so this really
+    // does take the path it is meant to be testing.
     let accept = match kind {
-        RequestKind::Api => "Accept: */*\r\n",
-        RequestKind::Navigation => "Accept: text/html\r\nSec-Fetch-Mode: navigate\r\n",
+        RequestKind::Api => format!("{}: */*\r\n", navigation::ACCEPT_HEADER),
+        RequestKind::Navigation => format!(
+            "{}: {}\r\n{}: {}\r\n",
+            navigation::ACCEPT_HEADER,
+            navigation::ACCEPT,
+            navigation::MODE_HEADER,
+            navigation::MODE,
+        ),
     };
     let request = format!(
         "GET / HTTP/1.1\r\nHost: {host}\r\nUser-Agent: devconcurrent\r\n{accept}\

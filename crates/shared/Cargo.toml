@@ -7,6 +7,7 @@ publish = false
 
 [dependencies]
 handlebars = "6.4.4"
+http = "1.5.0"
 indexmap = { workspace = true }
 schemars = { version = "1.2.2", features = ["indexmap2", "preserve_order"] }
 serde = { workspace = true }

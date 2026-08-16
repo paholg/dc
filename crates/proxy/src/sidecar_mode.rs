@@ -36,7 +36,7 @@ use rustls::ServerConfig;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, pem::PemObject};
 use shared::{
     HTTP_PORT, HTTPS_PORT, SIDECAR_CERT_FILE, SIDECAR_KEY_FILE, SIDECAR_PLAN_DIR,
-    SIDECAR_PLAN_FILE, SidecarPlan,
+    SIDECAR_PLAN_FILE, SidecarPlan, navigation,
 };
 use tokio::io::{AsyncWriteExt, copy_bidirectional};
 use tokio::net::{TcpListener, TcpStream};
@@ -249,11 +249,10 @@ fn redirect_target_for(head: &[u8]) -> Option<String> {
             .and_then(|h| std::str::from_utf8(h.value).ok())
     };
 
-    let navigating = match header("sec-fetch-mode") {
-        // Every current browser sends this, and says exactly what it's doing.
-        Some(mode) => mode.eq_ignore_ascii_case("navigate"),
-        // Anything older: the closest available signal is asking for a page.
-        None => header("accept").is_some_and(|accept| accept.contains("text/html")),
+    let navigating = match header(navigation::MODE_HEADER.as_str()) {
+        Some(mode) => mode.eq_ignore_ascii_case(navigation::MODE),
+        None => header(navigation::ACCEPT_HEADER.as_str())
+            .is_some_and(|accept| accept.contains(navigation::ACCEPT)),
     };
     if !navigating {
         return None;
@@ -268,17 +267,18 @@ fn redirect_target_for(head: &[u8]) -> Option<String> {
     Some(format!("https://{host}{}", req.path.unwrap_or("/")))
 }
 
-/// 307 rather than 301: a permanent redirect would be cached against this
-/// hostname more or less forever, which is miserable the first time someone
-/// turns TLS off. 307 also preserves the method, though only GET and HEAD
-/// reach here.
 async fn send_redirect(stream: &mut TcpStream, location: &str) {
+    let status = navigation::REDIRECT_STATUS;
+    // `StatusCode`'s own Display is the bare number, so the reason phrase has
+    // to be asked for separately.
+    let reason = status.canonical_reason().unwrap_or("Redirect");
     let response = format!(
-        "HTTP/1.1 307 Temporary Redirect\r\n\
+        "HTTP/1.1 {} {reason}\r\n\
          Location: {location}\r\n\
          Content-Length: 0\r\n\
          Connection: close\r\n\
-         \r\n"
+         \r\n",
+        status.as_u16(),
     );
     let _ = stream.write_all(response.as_bytes()).await;
     let _ = stream.shutdown().await;
@@ -338,19 +338,19 @@ mod tests {
         "Accept: text/html",
     ];
 
-    /// `dc proxy status` reports the http column by sending this exact head
-    /// and asserting it gets a 307 (`check_http_app` in the CLI). The two live
-    /// in different crates, so this pins our half of that agreement.
+    /// Both this matcher and the request `dc proxy status` probes with are
+    /// built from `shared::navigation`, so they agree by construction. This
+    /// checks the constants actually survive the round trip onto the wire and
+    /// back through `httparse`.
     #[test]
-    fn redirects_the_request_proxy_status_probes_with() {
+    fn redirects_a_request_built_from_the_shared_constants() {
         let probe = [
-            "GET / HTTP/1.1",
-            "Host: app.proj.test",
-            "User-Agent: devconcurrent",
-            "Accept: text/html",
-            "Sec-Fetch-Mode: navigate",
-            "Connection: close",
+            "GET / HTTP/1.1".to_string(),
+            "Host: app.proj.test".to_string(),
+            format!("{}: {}", navigation::ACCEPT_HEADER, navigation::ACCEPT),
+            format!("{}: {}", navigation::MODE_HEADER, navigation::MODE),
         ];
+        let probe: Vec<&str> = probe.iter().map(String::as_str).collect();
         assert_eq!(
             redirect_target_for(&head(&probe)).as_deref(),
             Some("https://app.proj.test/"),

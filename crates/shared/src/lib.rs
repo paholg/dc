@@ -190,6 +190,33 @@ impl handlebars::HelperDef for HostnameHelper {
 pub const HTTP_PORT: u16 = 80;
 pub const HTTPS_PORT: u16 = 443;
 
+/// How the sidecar picks out a browser navigation on [`HTTP_PORT`], and what
+/// it answers one with.
+///
+/// The sidecar matches on these; `dc proxy status` builds a request from them
+/// so that its http check exercises the redirect rather than being spliced
+/// through as a scripted request would be. They only agree because they are
+/// the same constants.
+pub mod navigation {
+    use http::{HeaderName, StatusCode, header};
+
+    /// Set by every current browser, and says exactly what the request is for.
+    pub const MODE_HEADER: HeaderName = HeaderName::from_static("sec-fetch-mode");
+    /// The [`MODE_HEADER`] value that means "the user is going to this page".
+    pub const MODE: &str = "navigate";
+
+    /// For clients too old to send [`MODE_HEADER`], the closest available
+    /// signal is asking for a page.
+    pub const ACCEPT_HEADER: HeaderName = header::ACCEPT;
+    pub const ACCEPT: &str = "text/html";
+
+    /// Temporary, not permanent: a 301 would be cached against the hostname
+    /// more or less forever, which is miserable the first time someone turns
+    /// TLS off. It also preserves the method, though only GET and HEAD are
+    /// ever redirected.
+    pub const REDIRECT_STATUS: StatusCode = StatusCode::TEMPORARY_REDIRECT;
+}
+
 #[derive(Deserialize, Serialize, Clone, Debug, Default, JsonSchema)]
 #[serde(rename_all = "camelCase", default)]
 pub struct ProxyService {

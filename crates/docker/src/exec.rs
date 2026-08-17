@@ -1,18 +1,38 @@
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 
 use crate::client::Docker;
 use crate::error::Result;
 use crate::request_ext::ReqwestExt;
 
 /// Result of `GET /exec/{id}/json` — i.e. `docker exec inspect`.
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "PascalCase")]
+#[derive(Debug, Clone)]
 pub struct ExecDetails {
-    #[serde(rename = "ID")]
     pub id: String,
     pub running: bool,
     /// Exit code; `None` while still running.
     pub exit_code: Option<i64>,
+}
+
+impl<'de> Deserialize<'de> for ExecDetails {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> std::result::Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "PascalCase")]
+        struct Raw {
+            #[serde(rename = "ID")]
+            id: String,
+            running: bool,
+            exit_code: Option<i64>,
+        }
+
+        let raw = Raw::deserialize(d)?;
+        Ok(Self {
+            id: raw.id,
+            running: raw.running,
+            // Podman reports an exit code on an exec that is still running,
+            // where Docker sends null. Neither is meaningful until it exits.
+            exit_code: (!raw.running).then_some(raw.exit_code).flatten(),
+        })
+    }
 }
 
 impl Docker {

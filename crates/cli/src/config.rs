@@ -81,17 +81,18 @@ pub(crate) struct Config {
 
 /// Global shell-integration settings, applied when you source
 /// `COMPLETE=<shell> devconcurrent`.
-#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase", default)]
 pub(crate) struct ShellGlobal {
     /// Register a prompt hook to auto-set the variables from `customizations.devconcurrent.env`
     /// based on your current working directory.
-    #[serde(default = "true_fn")]
     pub(crate) export_env: bool,
 }
 
-fn true_fn() -> bool {
-    true
+impl Default for ShellGlobal {
+    fn default() -> Self {
+        Self { export_env: true }
+    }
 }
 
 /// Global user proxy settings.

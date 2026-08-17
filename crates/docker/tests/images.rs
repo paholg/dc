@@ -6,8 +6,8 @@
 
 use std::process::Command;
 
-use docker::test_support::{TEST_LABEL, unique_name};
-use docker::{Docker, Error};
+use docker::test_support::{TEST_LABEL, repo_tag_names, unique_name};
+use docker::{Docker, Error, build_single_file_tar};
 
 const IMAGE: &str = "alpine:3.20";
 
@@ -65,35 +65,15 @@ impl Drop for ImageCleanup {
 }
 
 /// Tag `alpine` under a fresh name carrying `labels`.
-///
-/// The crate has no build API, so this goes through the CLI — the same reason
-/// `inspect_exec.rs` shells out for exec.
-fn build_labelled_image(tag: &str, labels: &[(&str, &str)]) {
-    let mut args = vec!["build".to_string(), "-t".to_string(), tag.to_string()];
+async fn build_labelled_image(client: &Docker, tag: &str, labels: &[(&str, &str)]) {
+    let mut build = client.build_image(tag).context(build_single_file_tar(
+        "Dockerfile",
+        format!("FROM {IMAGE}\n").as_bytes(),
+    ));
     for (key, value) in labels {
-        args.push("--label".to_string());
-        args.push(format!("{key}={value}"));
+        build = build.with_label(*key, *value);
     }
-    args.push("-".to_string());
-
-    let mut child = Command::new("docker")
-        .args(&args)
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::piped())
-        .spawn()
-        .expect("spawn docker build");
-    {
-        use std::io::Write;
-        let stdin = child.stdin.as_mut().expect("build stdin");
-        writeln!(stdin, "FROM {IMAGE}").expect("write Dockerfile");
-    }
-    let out = child.wait_with_output().expect("docker build");
-    assert!(
-        out.status.success(),
-        "docker build failed: {}",
-        String::from_utf8_lossy(&out.stderr).trim()
-    );
+    build.call().await.expect("build the labelled image");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -108,7 +88,12 @@ async fn list_by_label_then_remove() {
     let (key, value) = TEST_LABEL.split_once('=').expect("TEST_LABEL is key=value");
     // A second, tag-unique label so the assertion can't be satisfied by some
     // other image left over from a previous run.
-    build_labelled_image(&tag, &[(key, value), ("devconcurrent-image-test", &tag)]);
+    build_labelled_image(
+        &client,
+        &tag,
+        &[(key, value), ("devconcurrent-image-test", &tag)],
+    )
+    .await;
 
     let listed = client
         .list_images()
@@ -119,7 +104,12 @@ async fn list_by_label_then_remove() {
 
     let found = listed
         .iter()
-        .find(|image| image.repo_tags.iter().any(|t| t.starts_with(&tag)))
+        .find(|image| {
+            image
+                .repo_tags
+                .iter()
+                .any(|repo_tag| repo_tag_names(repo_tag, &tag))
+        })
         .unwrap_or_else(|| {
             panic!(
                 "labelled image should be listed; got {:?}",
@@ -138,6 +128,38 @@ async fn list_by_label_then_remove() {
     assert!(
         matches!(client.inspect_image(&tag).await, Err(Error::NotFound)),
         "the tag should be gone after removal"
+    );
+}
+
+/// A failed build is reported in the response stream, with a 200 status, so it
+/// only surfaces as an error if the stream is actually inspected.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_failing_build_is_an_error() {
+    let client = Docker::connect().await.expect("connect");
+    client.ensure_image(IMAGE).await.expect("ensure base image");
+
+    let tag = unique_name().to_lowercase();
+    let _cleanup = ImageCleanup(tag.clone());
+    let mut output = Vec::new();
+
+    let err = client
+        .build_image(&tag)
+        .context(build_single_file_tar(
+            "Dockerfile",
+            format!("FROM {IMAGE}\nRUN exit 3\n").as_bytes(),
+        ))
+        .on_output(&mut |line: &str| output.push(line.to_string()))
+        .call()
+        .await
+        .expect_err("a build whose RUN fails should error");
+
+    assert!(
+        matches!(err, Error::Api { .. }),
+        "expected Api, got {err:?}"
+    );
+    assert!(
+        !output.is_empty(),
+        "the steps leading up to the failure should have been reported",
     );
 }
 

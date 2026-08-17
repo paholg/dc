@@ -11,6 +11,9 @@ pub(crate) trait ReqwestExt {
     /// Drain a newline-delimited JSON response, parsing each non-empty line
     /// into `T`. Drops any blank lines.
     async fn try_send_ndjson<T: DeserializeOwned>(self) -> crate::Result<Vec<T>>;
+    /// Send and validate, handing back the response with its body unread, for
+    /// endpoints whose output is worth reporting as it arrives.
+    async fn try_send_streaming(self) -> crate::Result<reqwest::Response>;
 }
 
 impl ReqwestExt for RequestBuilder {
@@ -36,11 +39,15 @@ impl ReqwestExt for RequestBuilder {
             })
             .collect()
     }
+
+    async fn try_send_streaming(self) -> crate::Result<reqwest::Response> {
+        check_response(self).await
+    }
 }
 
-/// Send and validate; returns the response body bytes on success. Maps 404 to
+/// Send and validate; returns the response with its body unread. Maps 404 to
 /// [`Error::NotFound`] and other non-success statuses to [`Error::Api`].
-async fn check_response_body(request: RequestBuilder) -> crate::Result<bytes::Bytes> {
+async fn check_response(request: RequestBuilder) -> crate::Result<reqwest::Response> {
     let response = request.send().await?;
     let status = response.status();
     if status == StatusCode::NOT_FOUND {
@@ -54,5 +61,10 @@ async fn check_response_body(request: RequestBuilder) -> crate::Result<bytes::By
         }
         .fail();
     }
-    Ok(response.bytes().await?)
+    Ok(response)
+}
+
+/// As [`check_response`], reading the body to completion.
+async fn check_response_body(request: RequestBuilder) -> crate::Result<bytes::Bytes> {
+    Ok(check_response(request).await?.bytes().await?)
 }

@@ -1,10 +1,12 @@
 use bon::bon;
+use futures_util::StreamExt;
 use indexmap::IndexMap;
 use serde::Deserialize;
+use snafu::ResultExt;
 
 use crate::client::Docker;
 use crate::container::null_as_default;
-use crate::error::{ApiSnafu, Result};
+use crate::error::{ApiSnafu, JsonSnafu, Result};
 use crate::filter::{Filter, FilterSliceExt};
 use crate::request_ext::ReqwestExt;
 
@@ -105,6 +107,17 @@ struct ErrorDetail {
     message: String,
 }
 
+/// One event in the NDJSON stream returned by `POST /build`. Build output
+/// arrives as `stream` lines; a failed build reports the reason here rather
+/// than in the HTTP status, which is 200 either way.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BuildEvent {
+    stream: Option<String>,
+    error: Option<String>,
+    error_detail: Option<ErrorDetail>,
+}
+
 impl Docker {
     /// Pull the image if it isn't already present locally. No-op if it is.
     pub async fn ensure_image(&self, name: &str) -> Result<()> {
@@ -149,6 +162,132 @@ impl Docker {
         }
         Ok(())
     }
+}
+
+#[bon]
+impl Docker {
+    /// `POST /build?t=<tag>` — build an image from a tar `context`.
+    ///
+    /// Both Docker and podman implement this endpoint, where `docker build`
+    /// does not: the CLI reaches for buildx, whose `docker-container` driver
+    /// boots a buildkit container that rootless podman refuses to start.
+    ///
+    /// The daemon reports progress as the build runs, so `on_output` is called
+    /// with each line as it arrives rather than in one batch at the end.
+    ///
+    /// A build that fails reports it in that same stream, not the status code,
+    /// which is 200 either way; both surface as [`crate::Error::Api`].
+    #[builder]
+    pub async fn build_image(
+        &self,
+        #[builder(start_fn)] tag: &str,
+        #[builder(field)] labels: IndexMap<String, String>,
+        #[builder(field)] build_args: IndexMap<String, String>,
+        /// The build context, as a tar archive. For a build that needs nothing
+        /// but a Dockerfile, see [`crate::build_single_file_tar`].
+        context: Vec<u8>,
+        /// Path of the Dockerfile within `context`.
+        #[builder(default = "Dockerfile")]
+        dockerfile: &str,
+        /// `os/arch[/variant]`. Defaults to the daemon's own platform.
+        platform: Option<&str>,
+        /// Called with each line of build output, as it arrives.
+        on_output: Option<&mut (dyn FnMut(&str) + Send)>,
+    ) -> Result<()> {
+        let mut url = self.url("build");
+        {
+            let mut pairs = url.query_pairs_mut();
+            pairs.append_pair("t", tag);
+            pairs.append_pair("dockerfile", dockerfile);
+            if let Some(platform) = platform {
+                pairs.append_pair("platform", platform);
+            }
+            if !labels.is_empty() {
+                pairs.append_pair("labels", &json_map(&labels));
+            }
+            if !build_args.is_empty() {
+                pairs.append_pair("buildargs", &json_map(&build_args));
+            }
+        }
+
+        let response = self
+            .http()
+            .post(url)
+            .header("Content-Type", "application/x-tar")
+            .body(context)
+            .try_send_streaming()
+            .await?;
+
+        let mut on_output = on_output;
+        let mut report = |line: &str| {
+            if let Some(sink) = on_output.as_mut() {
+                sink(line);
+            }
+        };
+
+        let mut stream = response.bytes_stream();
+        let mut pending = Vec::new();
+        while let Some(chunk) = stream.next().await {
+            pending.extend_from_slice(&chunk?);
+            // The daemon emits one JSON object per line, but a chunk boundary
+            // can land anywhere, so only whole lines are ready to parse.
+            while let Some(end) = pending.iter().position(|byte| *byte == b'\n') {
+                let line: Vec<u8> = pending.drain(..=end).collect();
+                handle_build_line(&line, &mut report)?;
+            }
+        }
+        handle_build_line(&pending, &mut report)
+    }
+}
+
+impl<S: docker_build_image_builder::State> DockerBuildImageBuilder<'_, '_, '_, '_, '_, S> {
+    pub fn with_label(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
+        self.labels.insert(key.into(), value.into());
+        self
+    }
+
+    pub fn with_build_arg(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
+        self.build_args.insert(key.into(), value.into());
+        self
+    }
+}
+
+/// Docker takes these query parameters as a JSON object rather than repeated
+/// pairs.
+fn json_map(map: &IndexMap<String, String>) -> String {
+    serde_json::to_string(map).expect("a string map serializes")
+}
+
+/// Parse one line of the build stream, reporting its output and turning a build
+/// failure into an error. Blank lines are skipped.
+fn handle_build_line(line: &[u8], report: &mut impl FnMut(&str)) -> Result<()> {
+    if line.iter().all(u8::is_ascii_whitespace) {
+        return Ok(());
+    }
+
+    let event: BuildEvent = serde_json::from_slice(line).with_context(|_| JsonSnafu {
+        body: String::from_utf8_lossy(line).into_owned(),
+    })?;
+
+    if event.error.is_some() || event.error_detail.is_some() {
+        let message = event
+            .error_detail
+            .map(|detail| detail.message)
+            .or(event.error)
+            .unwrap_or_else(|| event.stream.unwrap_or_default());
+        return ApiSnafu {
+            status: 0u16,
+            message,
+        }
+        .fail();
+    }
+
+    if let Some(text) = event.stream {
+        for line in text.lines() {
+            report(line);
+        }
+    }
+    Ok(())
 }
 
 #[bon]

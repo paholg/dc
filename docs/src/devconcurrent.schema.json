@@ -861,7 +861,7 @@
         "exportEnv": {
           "description": "Register a prompt hook to auto-set the variables from `customizations.devconcurrent.env`\nbased on your current working directory.",
           "type": "boolean",
-          "default": false
+          "default": true
         }
       }
     }

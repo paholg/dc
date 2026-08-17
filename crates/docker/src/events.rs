@@ -22,9 +22,26 @@ pub struct EventMessage {
     /// What happened — `start`, `die`, `kill`, `destroy`, `health_status`, ….
     pub action: Option<String>,
     pub actor: EventActor,
+    /// Unix seconds.
+    #[serde(rename = "time")]
     pub time: Option<i64>,
     #[serde(rename = "timeNano")]
     pub time_nano: Option<i64>,
+}
+
+impl EventMessage {
+    /// This event's time, formatted for [`EventsBuilder::since`]: unix
+    /// seconds, with nanosecond precision when the daemon reported it. `None`
+    /// if the event carries no timestamp at all.
+    #[must_use]
+    pub fn timestamp(&self) -> Option<String> {
+        if let Some(nanos) = self.time_nano {
+            let secs = nanos.div_euclid(1_000_000_000);
+            let frac = nanos.rem_euclid(1_000_000_000);
+            return Some(format!("{secs}.{frac:09}"));
+        }
+        self.time.map(|secs| secs.to_string())
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -41,6 +58,7 @@ pub struct EventActor {
 pub struct EventsBuilder<'a> {
     docker: &'a Docker,
     filters: HashMap<&'static str, Vec<String>>,
+    since: Option<String>,
 }
 
 impl Docker {
@@ -53,6 +71,7 @@ impl Docker {
         EventsBuilder {
             docker: self,
             filters: HashMap::new(),
+            since: None,
         }
     }
 }
@@ -88,13 +107,29 @@ impl EventsBuilder<'_> {
         self
     }
 
-    /// Open the stream. The returned `Stream` yields one [`EventMessage`] per
-    /// daemon event until the daemon closes the connection.
+    /// Replay events from `ts` onward before streaming live ones. `ts` is a
+    /// unix timestamp, optionally with fractional seconds
+    /// (`1755385200.123456789`) — see [`EventMessage::timestamp`]. The daemon
+    /// may include the event at exactly `ts`, so consumers must tolerate
+    /// duplicates.
+    #[must_use]
+    pub fn since(mut self, ts: impl Into<String>) -> Self {
+        self.since = Some(ts.into());
+        self
+    }
+
+    /// Open the stream. The returned `Stream` yields one item per daemon event
+    /// until the daemon closes the connection. A line the daemon sends that we
+    /// can't parse yields [`Error::Json`] and the stream continues; a
+    /// transport error yields that error and then ends.
     pub async fn call(self) -> Result<impl Stream<Item = Result<EventMessage>> + 'static> {
         let mut url = self.docker.url("events");
         if !self.filters.is_empty() {
             let json = serde_json::to_string(&self.filters).expect("string-keyed map serializes");
             url.query_pairs_mut().append_pair("filters", &json);
+        }
+        if let Some(since) = &self.since {
+            url.query_pairs_mut().append_pair("since", since);
         }
         let response = self.docker.http().get(url).send().await?;
         let status = response.status();
@@ -111,13 +146,22 @@ impl EventsBuilder<'_> {
     }
 }
 
+/// Split an NDJSON byte stream into events.
+///
+/// A line that doesn't deserialize is yielded as an error but leaves the
+/// stream open: the daemon emits a wide variety of event shapes, and one we
+/// don't understand must not cost the caller every subsequent event. Only a
+/// transport error or end-of-body ends the stream (`done` in the state).
 fn ndjson_lines<S>(stream: S) -> impl Stream<Item = Result<EventMessage>>
 where
     S: Stream<Item = Result<Bytes>> + Unpin + 'static,
 {
-    futures_util::stream::try_unfold(
-        (stream, Vec::<u8>::new()),
-        |(mut stream, mut buf)| async move {
+    futures_util::stream::unfold(
+        (stream, Vec::<u8>::new(), false),
+        |(mut stream, mut buf, done)| async move {
+            if done {
+                return None;
+            }
             loop {
                 if let Some(pos) = buf.iter().position(|&b| b == b'\n') {
                     let line: Vec<u8> = buf.drain(..=pos).collect();
@@ -125,30 +169,29 @@ where
                     if trimmed.is_empty() {
                         continue;
                     }
-                    let event: EventMessage =
-                        serde_json::from_slice(trimmed).context(JsonSnafu {
-                            body: String::from_utf8_lossy(trimmed).into_owned(),
-                        })?;
-                    return Ok(Some((event, (stream, buf))));
+                    return Some((parse_event(trimmed), (stream, buf, false)));
                 }
                 match stream.next().await {
                     Some(Ok(chunk)) => buf.extend_from_slice(&chunk),
-                    Some(Err(e)) => return Err(e),
+                    Some(Err(e)) => return Some((Err(e), (stream, buf, true))),
                     None => {
                         let trimmed = trim_eol(&buf);
                         if trimmed.is_empty() {
-                            return Ok(None);
+                            return None;
                         }
-                        let event: EventMessage =
-                            serde_json::from_slice(trimmed).context(JsonSnafu {
-                                body: String::from_utf8_lossy(trimmed).into_owned(),
-                            })?;
-                        return Ok(Some((event, (stream, Vec::new()))));
+                        let last = parse_event(trimmed);
+                        return Some((last, (stream, Vec::new(), true)));
                     }
                 }
             }
         },
     )
+}
+
+fn parse_event(line: &[u8]) -> Result<EventMessage> {
+    serde_json::from_slice(line).context(JsonSnafu {
+        body: String::from_utf8_lossy(line).into_owned(),
+    })
 }
 
 fn trim_eol(line: &[u8]) -> &[u8] {
@@ -157,4 +200,71 @@ fn trim_eol(line: &[u8]) -> &[u8] {
         end -= 1;
     }
     &line[..end]
+}
+
+#[cfg(test)]
+mod tests {
+    use futures_util::stream;
+
+    use super::*;
+
+    async fn lines(chunks: &[&str]) -> Vec<Result<EventMessage>> {
+        let owned: Vec<Result<Bytes>> = chunks
+            .iter()
+            .map(|c| Ok(Bytes::copy_from_slice(c.as_bytes())))
+            .collect();
+        ndjson_lines(Box::pin(stream::iter(owned)))
+            .collect::<Vec<_>>()
+            .await
+    }
+
+    fn event(action: &str) -> String {
+        format!(r#"{{"Type":"container","Action":"{action}","Actor":{{"ID":"abc"}}}}"#)
+    }
+
+    #[tokio::test]
+    async fn unparseable_line_does_not_end_the_stream() {
+        let body = format!("{}\nnot json\n{}\n", event("start"), event("die"));
+        let got = lines(&[&body]).await;
+        assert_eq!(got.len(), 3, "got {got:#?}");
+        assert_eq!(
+            got[0].as_ref().expect("first").action.as_deref(),
+            Some("start")
+        );
+        assert!(matches!(got[1], Err(Error::Json { .. })), "got {got:#?}");
+        assert_eq!(
+            got[2].as_ref().expect("third").action.as_deref(),
+            Some("die")
+        );
+    }
+
+    #[tokio::test]
+    async fn events_split_across_chunks() {
+        let body = event("start");
+        let (head, tail) = body.split_at(10);
+        let got = lines(&[head, tail, "\n"]).await;
+        assert_eq!(got.len(), 1, "got {got:#?}");
+        assert_eq!(
+            got[0].as_ref().expect("event").action.as_deref(),
+            Some("start")
+        );
+    }
+
+    #[test]
+    fn timestamp_uses_nanos_when_present() {
+        let ev: EventMessage = serde_json::from_str(
+            r#"{"Type":"container","Action":"die","Actor":{"ID":"abc"},"time":1755385200,"timeNano":1755385200123456789}"#,
+        )
+        .expect("deserialize");
+        assert_eq!(ev.timestamp().as_deref(), Some("1755385200.123456789"));
+    }
+
+    #[test]
+    fn timestamp_falls_back_to_seconds() {
+        let ev: EventMessage = serde_json::from_str(
+            r#"{"Type":"container","Action":"die","Actor":{"ID":"abc"},"time":1755385200}"#,
+        )
+        .expect("deserialize");
+        assert_eq!(ev.timestamp().as_deref(), Some("1755385200"));
+    }
 }

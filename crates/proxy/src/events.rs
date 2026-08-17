@@ -7,13 +7,20 @@
 //! Every start/die event triggers a full sync of the affected compose
 //! project. This handles arbitrary startup orders (siblings before the
 //! primary, etc.) without explicit state machines or pending queues.
+//!
+//! Events can still be missed — the daemon restarts, the socket drops, a
+//! reconnect lands after the gap — so the loop also reconciles against the
+//! real container list on every (re)subscribe and on a timer. Nothing here
+//! depends on having seen every event; the periodic [`resync`] is what makes
+//! a missed `die` (leaked sidecar, DNS pointing at a dead IP) heal itself.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::net::IpAddr;
+use std::time::Duration;
 
 use docker::{
-    COMPOSE_PROJECT_LABEL, COMPOSE_SERVICE_LABEL, Docker, EventActor, PROJECT_LABEL, PROXY_LABEL,
-    WORKSPACE_LABEL,
+    COMPOSE_PROJECT_LABEL, COMPOSE_SERVICE_LABEL, Docker, EventActor, NetworkSettings,
+    PROJECT_LABEL, PROXY_LABEL, WORKSPACE_LABEL,
 };
 use eyre::Result;
 use futures_util::StreamExt;
@@ -24,38 +31,109 @@ use crate::certs::CaHolder;
 use crate::registry::{Registry, RunningService};
 use crate::sidecar;
 
+/// How often to reconcile tracked state against docker regardless of events.
+const RESYNC_INTERVAL: Duration = Duration::from_secs(60);
+
+/// Backoff between a dropped event stream and the next subscribe attempt.
+const RECONNECT_DELAY: Duration = Duration::from_secs(2);
+
 /// Run the event loop. Reconnects on connection drops with a brief backoff.
 pub async fn run(docker: Docker, registry: Registry, ca: Option<CaHolder>) {
+    // Timestamp of the last event we processed, replayed on reconnect so the
+    // gap is (mostly) covered. The daemon may resend the event at exactly this
+    // time; handling is idempotent, so duplicates are harmless.
+    let mut since: Option<String> = None;
     loop {
-        let stream = match docker
+        let mut builder = docker
             .events()
             .with_type("container")
             .with_event("start")
             .with_event("die")
-            .with_event("destroy")
-            .call()
-            .await
-        {
+            .with_event("destroy");
+        if let Some(ts) = &since {
+            builder = builder.since(ts);
+        }
+        let stream = match builder.call().await {
             Ok(s) => s,
             Err(e) => {
                 tracing::warn!("failed to open docker events: {e}; retrying in 2s");
-                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                tokio::time::sleep(RECONNECT_DELAY).await;
                 continue;
             }
         };
         tokio::pin!(stream);
-        tracing::info!("subscribed to docker events");
+        tracing::info!(since, "subscribed to docker events");
 
-        while let Some(item) = stream.next().await {
-            match item {
-                Ok(ev) => handle_event(&docker, &registry, ca.as_ref(), ev).await,
-                Err(e) => {
-                    tracing::warn!("docker events stream error: {e}");
-                    break;
+        // Subscribe first, then reconcile: anything that changed while we
+        // weren't listening is caught here, and anything that changes from now
+        // on arrives as an event.
+        resync(&docker, &registry, ca.as_ref()).await;
+
+        let mut ticker = tokio::time::interval(RESYNC_INTERVAL);
+        // A resync slower than the interval shouldn't queue up more of them.
+        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        ticker.tick().await; // The first tick completes immediately.
+        loop {
+            tokio::select! {
+                item = stream.next() => match item {
+                    Some(Ok(ev)) => {
+                        if let Some(ts) = ev.timestamp() {
+                            since = Some(ts);
+                        }
+                        handle_event(&docker, &registry, ca.as_ref(), ev).await;
+                    }
+                    // One event we can't parse costs us that event only; the
+                    // next resync covers whatever it would have told us.
+                    Some(Err(e @ docker::Error::Json { .. })) => {
+                        tracing::warn!("skipping unparseable docker event: {e}");
+                    }
+                    Some(Err(e)) => {
+                        tracing::warn!("docker events stream error: {e}");
+                        break;
+                    }
+                    None => {
+                        tracing::warn!("docker events stream ended");
+                        break;
+                    }
+                },
+                _ = ticker.tick() => resync(&docker, &registry, ca.as_ref()).await,
+            }
+        }
+        tokio::time::sleep(RECONNECT_DELAY).await;
+    }
+}
+
+/// Reconcile everything we track against what docker actually has running:
+/// drop services whose container is gone (and their sidecars), pick up
+/// containers we never saw start, and remove sidecars left behind by a proxy
+/// or event-stream outage.
+pub(crate) async fn resync(docker: &Docker, registry: &Registry, ca: Option<&CaHolder>) {
+    match docker.list_containers().call().await {
+        Ok(containers) => {
+            let alive: HashMap<String, Option<IpAddr>> = containers
+                .into_iter()
+                .map(|c| (c.id, first_ip(&c.network_settings)))
+                .collect();
+            for svc in registry.reconcile_services(&alive).await {
+                tracing::info!(
+                    project = svc.project,
+                    workspace = svc.workspace,
+                    service = svc.service,
+                    container = svc.target_cid,
+                    "service container is gone; untracking"
+                );
+                if let Some(sidecar_id) = svc.sidecar_id {
+                    sidecar::remove_sidecar(docker, &sidecar_id).await;
                 }
             }
         }
-        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        Err(e) => tracing::warn!("list containers during resync: {e}"),
+    }
+    if let Err(e) = bootstrap(docker, registry, ca).await {
+        tracing::warn!("adopting running containers during resync: {e:?}");
+    }
+    if let Err(e) = sidecar::sweep_orphans(docker).await {
+        tracing::warn!("orphan sweep failed: {e:?}");
     }
 }
 
@@ -264,18 +342,24 @@ pub(crate) async fn inspect_container_ip(docker: &Docker, cid: &str) -> Result<I
         .inspect_container(cid)
         .await
         .map_err(|e| eyre::eyre!("inspect container {cid}: {e}"))?;
-    for endpoint in details.network_settings.networks.values() {
-        let Some(raw) = endpoint.ip_address.as_deref() else {
-            continue;
-        };
-        if raw.is_empty() {
-            continue;
-        }
-        return raw
-            .parse::<IpAddr>()
-            .map_err(|e| eyre::eyre!("parse container ip {raw:?}: {e}"));
-    }
-    eyre::bail!("container {cid} has no network with an IP");
+    first_ip(&details.network_settings)
+        .ok_or_else(|| eyre::eyre!("container {cid} has no network with a parseable IP"))
+}
+
+/// First non-empty, parseable IP across a container's networks.
+fn first_ip(settings: &NetworkSettings) -> Option<IpAddr> {
+    settings
+        .networks
+        .values()
+        .filter_map(|endpoint| endpoint.ip_address.as_deref())
+        .filter(|raw| !raw.is_empty())
+        .find_map(|raw| match raw.parse::<IpAddr>() {
+            Ok(ip) => Some(ip),
+            Err(e) => {
+                tracing::warn!(ip = raw, "unparseable container IP, skipping: {e}");
+                None
+            }
+        })
 }
 
 /// Bootstrap: at startup, find every compose project containing at least one

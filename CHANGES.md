@@ -6,7 +6,6 @@ here.
 NOTE: Document the dangers of `mountGit` -- a container can write to it, which
 could result in host execution.
 
-
 ## Matching the container user to you
 
 `mountGit` shares one `.git` directory between the host and the container. If

@@ -39,6 +39,22 @@ where
     }
 }
 
+/// Serialize a sequence as a Go set: `map[T]struct{}`. JSON has no set, so Go
+/// encodes one as an object whose values are empty objects; only the keys carry
+/// meaning.
+///
+/// Keys must serialize as strings, since JSON has no other kind of key.
+fn as_go_set<T, S>(items: &[T], serializer: S) -> std::result::Result<S::Ok, S::Error>
+where
+    T: Serialize,
+    S: Serializer,
+{
+    #[derive(Serialize)]
+    struct NoValue {}
+
+    serializer.collect_map(items.iter().map(|item| (item, NoValue {})))
+}
+
 /// Result of `GET /containers/{id}/json` — i.e. `docker inspect`.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "PascalCase")]
@@ -302,6 +318,9 @@ struct CreateRequest<'a> {
     cmd: Option<&'a [String]>,
     #[serde(skip_serializing_if = "Option::is_none")]
     env: Option<&'a [String]>,
+    /// The `port/protocol` of every port we bind.
+    #[serde(skip_serializing_if = "<[_]>::is_empty", serialize_with = "as_go_set")]
+    exposed_ports: Vec<&'a str>,
     host_config: HostConfig<'a>,
 }
 
@@ -356,6 +375,7 @@ impl Docker {
             entrypoint: (!entrypoint.is_empty()).then_some(&entrypoint),
             cmd: (!cmd.is_empty()).then_some(&cmd),
             env: (!env.is_empty()).then_some(&env),
+            exposed_ports: port_bindings.keys().map(String::as_str).collect(),
             host_config: HostConfig {
                 binds: (!binds.is_empty()).then_some(&binds),
                 port_bindings: (!port_bindings.is_empty()).then_some(&port_bindings),
@@ -477,5 +497,65 @@ mod tests {
         assert!(summary.labels.is_empty());
         assert!(summary.ports.is_empty());
         assert!(summary.network_settings.networks.is_empty());
+    }
+
+    /// A bound port has to be declared in `ExposedPorts` too. The proxy binds
+    /// one port as both UDP and TCP, so the protocol has to survive into the
+    /// set — keying on the number alone would lose one.
+    #[test]
+    fn bound_ports_are_also_exposed_per_protocol() {
+        let labels = IndexMap::new();
+        let mut port_bindings = IndexMap::new();
+        for key in ["53/udp", "53/tcp"] {
+            port_bindings.insert(
+                key.to_string(),
+                vec![PortBindingEntry {
+                    host_ip: "127.0.0.1".parse().unwrap(),
+                    host_port: 53,
+                }],
+            );
+        }
+
+        let body = serde_json::to_value(CreateRequest {
+            image: "alpine",
+            labels: &labels,
+            entrypoint: None,
+            cmd: None,
+            env: None,
+            exposed_ports: port_bindings.keys().map(String::as_str).collect(),
+            host_config: HostConfig {
+                binds: None,
+                port_bindings: Some(&port_bindings),
+                network_mode: None,
+            },
+        })
+        .expect("serialize");
+
+        assert_eq!(
+            body["ExposedPorts"],
+            serde_json::json!({"53/udp": {}, "53/tcp": {}}),
+        );
+    }
+
+    /// A container with no bindings must not send an empty `ExposedPorts`.
+    #[test]
+    fn a_container_without_bindings_exposes_nothing() {
+        let labels = IndexMap::new();
+        let body = serde_json::to_value(CreateRequest {
+            image: "alpine",
+            labels: &labels,
+            entrypoint: None,
+            cmd: None,
+            env: None,
+            exposed_ports: Vec::new(),
+            host_config: HostConfig {
+                binds: None,
+                port_bindings: None,
+                network_mode: None,
+            },
+        })
+        .expect("serialize");
+
+        assert!(body.get("ExposedPorts").is_none());
     }
 }

@@ -7,6 +7,7 @@ use eyre::{Context, eyre};
 use indexmap::IndexMap;
 use serde_json::json;
 
+use crate::run::run_command;
 use crate::{state::DevcontainerState, workspace::Workspace};
 
 fn override_path(workspace: &Workspace) -> PathBuf {
@@ -234,6 +235,43 @@ pub(crate) async fn compose_cmd(
     Ok(cmd)
 }
 
+/// The image the primary service resolves to.
+///
+/// Asking compose beats deriving the name ourselves: for a service that only
+/// has `build:`, the answer is compose's own `{project}-{service}` convention,
+/// whose separator changed in compose 2.8.
+pub(crate) async fn compose_image(
+    devcontainer: &DevcontainerState,
+    workspace: &Workspace<'_>,
+) -> eyre::Result<String> {
+    let service = &devcontainer.config.service;
+    // Without our override, so this reports the service's own image rather than
+    // a pin `up` may already have written — but *with* `-p`, since a build-only
+    // service takes its image name from the project name, and compose would
+    // otherwise fall back to the compose file's directory.
+    let mut cmd = compose_config_cmd(devcontainer, workspace)?;
+    cmd.arg("-p")
+        .arg(project_name(devcontainer, workspace).await?);
+    cmd.args(["config", "--images", service]);
+
+    let out = cmd
+        .output()
+        .await
+        .wrap_err("failed to run docker compose")?;
+    eyre::ensure!(
+        out.status.success(),
+        "docker compose config --images failed: {}",
+        String::from_utf8_lossy(&out.stderr).trim()
+    );
+
+    String::from_utf8(out.stdout)?
+        .lines()
+        .map(str::trim)
+        .find(|s| !s.is_empty())
+        .map(ToOwned::to_owned)
+        .ok_or_else(|| eyre!("docker compose reported no image for service '{service}'"))
+}
+
 /// Every service defined by this workspace's compose files, sorted.
 ///
 /// Read from the compose configuration rather than from running containers, so
@@ -264,6 +302,19 @@ pub(crate) async fn compose_services(
         .collect();
     services.sort();
     Ok(services)
+}
+
+/// Pull the primary service's image.
+///
+/// Through compose rather than the API, so the user's registry credentials
+/// apply.
+pub(crate) async fn compose_pull(
+    devcontainer: &DevcontainerState,
+    workspace: &Workspace<'_>,
+) -> eyre::Result<()> {
+    let mut cmd = compose_config_cmd(devcontainer, workspace)?;
+    cmd.args(["pull", &devcontainer.config.service]);
+    run_command(cmd, "docker compose pull").await
 }
 
 pub(crate) async fn compose_ps_q(
@@ -412,6 +463,9 @@ fn write_compose_override(
     }
     if let Some(user) = &devcontainer.config.container_user {
         service_obj["user"] = json!(context.render_field("containerUser", user)?);
+    }
+    if let Some(image) = devcontainer.derived_image.get() {
+        service_obj["image"] = json!(image);
     }
 
     let devconcurrent_options = devcontainer.devconcurrent();

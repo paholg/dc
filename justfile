@@ -38,7 +38,7 @@ proxy-clear:
         | xargs -r docker rmi -f
 
 test *args:
-    cargo nextest run --all-features --no-fail-fast {{args}}
+    cargo nextest run --workspace --all-features --no-fail-fast {{args}}
     docker ps -aq --filter "label=devconcurrent-docker-crate-test=true" | xargs -r docker rm -f
     
 up:
@@ -47,7 +47,7 @@ up:
 
 _fix:
     just gen
-    cargo clippy --all-features --all-targets --fix --allow-staged
+    cargo clippy --all-features --all-targets --workspace --fix --allow-staged
     cargo fmt
     tombi format
     rumdl fmt
@@ -62,7 +62,7 @@ check-schema:
 
 lint:
     cargo fmt --all -- --check
-    cargo clippy --all-features --all-targets -- -D warnings
+    cargo clippy --all-features --all-targets --workspace -- -D warnings
     tombi lint
     rumdl check
 

@@ -4,6 +4,7 @@ members = ["crates/*"]
 default-members = ["crates/cli"]
 
 [workspace.dependencies]
+bon = "3.9.3"
 indexmap = { version = "2.14", features = ["serde"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }

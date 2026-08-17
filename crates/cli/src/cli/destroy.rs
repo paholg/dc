@@ -119,8 +119,9 @@ impl Runnable for Cleanup<'_> {
 
             remove_override_file(self.workspace);
 
-            // Remove any port-forward sidecars targeting this workspace
             let client = &devcontainer.docker().await?.client;
+
+            // Remove any port-forward sidecars targeting this workspace
             if let Ok(summaries) = client
                 .list_containers()
                 .all(true)
@@ -134,6 +135,24 @@ impl Runnable for Cleanup<'_> {
                         Ok(()) | Err(docker::Error::NotFound) => {}
                         Err(e) => {
                             tracing::warn!(container = %c.id, "failed to remove sidecar: {e}");
+                        }
+                    }
+                }
+            }
+
+            // `compose down --rmi local` skips images with a custom `image` tag, so remove them ourselves.
+            if let Ok(images) = client
+                .list_images()
+                .with_label(PROJECT_LABEL, self.workspace.state.project_name.as_str())
+                .with_label(WORKSPACE_LABEL, self.workspace.name.as_str())
+                .call()
+                .await
+            {
+                for image in images {
+                    match client.remove_image(&image.id).force(true).call().await {
+                        Ok(()) | Err(docker::Error::NotFound) => {}
+                        Err(e) => {
+                            tracing::warn!(image = %image.id, "failed to remove image: {e}");
                         }
                     }
                 }

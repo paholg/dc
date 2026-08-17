@@ -6,7 +6,7 @@ description = "Minimal client for the Docker / Podman Engine API"
 publish = false
 
 [dependencies]
-bon = "3.9.3"
+bon = { workspace = true }
 bytes = "1.12"
 futures-util = "0.3"
 indexmap = { workspace = true }

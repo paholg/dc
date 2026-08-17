@@ -63,5 +63,11 @@ winnow = "1.0.4"
 jsonschema = { version = "0.49.9", default-features = false }
 tempfile = { workspace = true }
 
+[features]
+# Compile the tests that talk to a real docker (or podman-as-docker) daemon.
+# Same rationale and name as the `docker` crate's feature: off by default so
+# environments without a daemon (e.g. the nix flake check sandbox) still pass.
+docker-tests = []
+
 [lints]
 workspace = true

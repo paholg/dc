@@ -6,15 +6,19 @@ use indexmap::IndexMap;
 use tracing::info_span;
 use tracing_indicatif::span_ext::IndicatifSpanExt;
 
+use docker::MANAGED_LABEL;
+
 use crate::cli::exec::exec_interactive;
 use crate::cli::fwd::forward;
 use crate::cli::{State, go, proxy};
 use crate::complete::complete_workspace;
 use crate::config::Config;
-use crate::docker::compose::{self, compose_cmd, compose_ps_q};
-use crate::docker::probe;
+use crate::devcontainer::substitution;
+use crate::docker::compose::{self, compose_cmd, compose_image, compose_ps_q, compose_pull};
+use crate::docker::{probe, uid};
 use crate::run::cmd::NamedCmd;
 use crate::run::{self, Runner};
+use crate::state::DevcontainerState;
 use crate::workspace::Workspace;
 use crate::worktree;
 
@@ -134,17 +138,28 @@ impl Up {
         let project_name = compose::project_name(devcontainer, workspace).await?;
         compose::ensure_project_unclaimed(devcontainer, workspace, project_name).await?;
 
-        let mut compose_up_cmd = compose_cmd(devcontainer, workspace).await?;
-        compose_up_cmd.args(["up", "-d", "--build", "--remove-orphans"]);
+        // Build first, separately from `up`: the uid remap layers onto the
+        // service's built image, so the image has to exist before the override
+        // that pins it can be written.
+        let mut compose_build_cmd = compose_cmd(devcontainer, workspace).await?;
+        compose_build_cmd.arg("build");
+        self.add_services(devcontainer, &mut compose_build_cmd);
+        let build_cmd = compose_build_cmd.into_std().into();
+        Runner::run(NamedCmd {
+            name: "docker compose build",
+            cmd: &build_cmd,
+            dir: None,
+        })
+        .await?;
 
-        if let Some(ref services) = devcontainer.config.run_services {
-            compose_up_cmd.args(services);
-            if !services.contains(&devcontainer.config.service) {
-                // TODO: We probably want this in the `else` also, or maybe we
-                // don't need it at all?
-                compose_up_cmd.arg(&devcontainer.config.service);
-            }
-        }
+        self.update_remote_user_uid(devcontainer, workspace, project_name)
+            .await?;
+
+        let mut compose_up_cmd = compose_cmd(devcontainer, workspace).await?;
+        // No `--build`: the build above already ran, and rebuilding here would
+        // re-tag the service's own Dockerfile output over the pinned image.
+        compose_up_cmd.args(["up", "-d", "--remove-orphans"]);
+        self.add_services(devcontainer, &mut compose_up_cmd);
 
         let up_cmd = compose_up_cmd.into_std().into();
         let cmd = NamedCmd {
@@ -163,12 +178,7 @@ impl Up {
         let context = devcontainer
             .context(&workspace.path)
             .with_container_env(&container.env);
-        let user = devcontainer
-            .config
-            .remote_user
-            .as_ref()
-            .map(|user| context.render_field("remoteUser", user))
-            .transpose()?;
+        let user = render_remote_user(devcontainer, &context)?;
         let user = user.as_deref();
         let probed = probe::user_env(
             &container_id,
@@ -229,4 +239,109 @@ impl Up {
 
         Ok(())
     }
+
+    /// Append the services `up`/`build` should act on.
+    fn add_services(&self, devcontainer: &DevcontainerState, cmd: &mut tokio::process::Command) {
+        if let Some(ref services) = devcontainer.config.run_services {
+            cmd.args(services);
+            if !services.contains(&devcontainer.config.service) {
+                // Ensure the primary service is included.
+                cmd.arg(&devcontainer.config.service);
+            }
+        }
+    }
+
+    /// Apply `updateRemoteUserUID`, recording the image it builds so that
+    /// later `compose_cmd` calls pin the service to it.
+    async fn update_remote_user_uid(
+        &self,
+        devcontainer: &DevcontainerState,
+        workspace: &Workspace<'_>,
+        project_name: &str,
+    ) -> eyre::Result<()> {
+        let base_image = compose_image(devcontainer, workspace).await?;
+        let client = &devcontainer.docker().await?.client;
+
+        let details = match client.inspect_image(&base_image).await {
+            Ok(details) => details,
+            // A service that only names an image has nothing for `compose
+            // build` to do, so the image may not be here yet — `up` used to be
+            // what fetched it. Pull through compose rather than the API so the
+            // user's registry credentials apply.
+            Err(docker::Error::NotFound) => {
+                compose_pull(devcontainer, workspace).await?;
+                client
+                    .inspect_image(&base_image)
+                    .await
+                    .wrap_err_with(|| format!("failed to inspect image {base_image}"))?
+            }
+            Err(e) => {
+                return Err(e).wrap_err_with(|| format!("failed to inspect image {base_image}"));
+            }
+        };
+
+        // The container doesn't exist yet, so `${containerEnv:…}` resolves
+        // against the image's environment — which is what the container will
+        // inherit anyway.
+        let image_env = details.config.parsed_env();
+        let context = devcontainer
+            .context(&workspace.path)
+            .with_container_env(&image_env);
+        let remote_user = render_remote_user(devcontainer, &context)?;
+        let container_user = devcontainer
+            .config
+            .container_user
+            .as_ref()
+            .map(|user| context.render_field("containerUser", user))
+            .transpose()?;
+
+        let base = uid::BaseImage {
+            user: &details.config.user,
+            platform: details.platform(),
+        };
+        let Some(update) = uid::plan(
+            &devcontainer.config,
+            &base,
+            uid::derived_image_name(project_name, &devcontainer.config.service),
+            container_user.as_deref(),
+            remote_user.as_deref(),
+            uid::host_ids(),
+        ) else {
+            return Ok(());
+        };
+
+        // The same labels the compose override puts on the service, so
+        // `destroy` finds the image with the query it already runs for
+        // containers.
+        let labels = [
+            (MANAGED_LABEL, "true"),
+            workspace.project_label(),
+            workspace.workspace_label(),
+        ];
+        uid::build(
+            &update,
+            &base_image,
+            workspace.state.project_working_dir(),
+            &labels,
+        )
+        .await?;
+
+        devcontainer
+            .derived_image
+            .set(update.fixed_image)
+            .map_err(|_| eyre::eyre!("the updateRemoteUserUID image was already set"))?;
+        Ok(())
+    }
+}
+
+fn render_remote_user(
+    devcontainer: &DevcontainerState,
+    context: &substitution::Context<'_>,
+) -> eyre::Result<Option<String>> {
+    devcontainer
+        .config
+        .remote_user
+        .as_ref()
+        .map(|user| context.render_field("remoteUser", user))
+        .transpose()
 }

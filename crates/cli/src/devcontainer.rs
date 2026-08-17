@@ -121,6 +121,7 @@ pub(crate) struct DevcontainerConfig {
     pub(crate) other_ports_attributes: Option<PortAttributes>,
     /// Controls whether on Linux the container's user should be updated with the local user's UID
     /// and GID. On by default when opening from a local folder.
+    #[serde(rename = "updateRemoteUserUID")]
     pub(crate) update_remote_user_uid: Option<bool>,
     /// Container environment variables.
     pub(crate) container_env: IndexMap<String, Template>,
@@ -178,6 +179,13 @@ pub(crate) struct DevcontainerConfig {
 }
 
 impl DevcontainerConfig {
+    /// Whether to remap the remote user's uid/gid to the host user's. Per spec,
+    /// on by default when opening from a local folder — which is the only thing
+    /// devconcurrent does.
+    pub(crate) fn update_remote_user_uid(&self) -> bool {
+        self.update_remote_user_uid.unwrap_or(true)
+    }
+
     /// Find the appropriate devcontainer.json file from the given root directory.
     ///
     /// Return None if there is no devcontainer.json file, and treat the project as one that

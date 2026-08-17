@@ -12,6 +12,7 @@ use crate::workspace::Workspace;
 
 pub(crate) mod compose;
 pub(crate) mod probe;
+pub(crate) mod uid;
 
 #[derive(Debug)]
 pub(crate) struct ContainerInfo {

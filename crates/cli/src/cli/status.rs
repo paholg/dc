@@ -183,7 +183,7 @@ impl Status {
                 .map(|ws| {
                     (
                         ws.name.clone(),
-                        build_sources(docker.clone(), ws.compose_project_name()),
+                        build_sources(docker.clone(), ws.path.clone()),
                     )
                 })
                 .collect(),
@@ -227,8 +227,7 @@ impl Status {
         docker: Arc<DockerClient>,
         workspace: &Workspace<'_>,
     ) -> eyre::Result<Table> {
-        let compose_project = workspace.compose_project_name();
-        let containers = docker.compose_container_info(&compose_project).await?;
+        let containers = docker.workspace_compose_info(&workspace.path).await?;
 
         let mut rows: Vec<ContainerRow> = containers
             .iter()
@@ -243,13 +242,13 @@ impl Status {
         // Live container states by id.
         let info = {
             let docker = docker.clone();
-            let compose_project = compose_project.clone();
+            let path = workspace.path.clone();
             Gatherer::spawn(PERIOD, move || {
                 let docker = docker.clone();
-                let compose_project = compose_project.clone();
+                let path = path.clone();
                 async move {
                     let states = docker
-                        .compose_container_info(&compose_project)
+                        .workspace_compose_info(&path)
                         .await
                         .unwrap_or_default()
                         .into_iter()
@@ -391,15 +390,15 @@ fn spawn_git(path: PathBuf) -> Gatherer<Datum<String>> {
 
 /// The per-workspace Docker gatherers. `stats`/`execs` derive off `info` to
 /// reuse the ids it discovers, so each runs independently without re-enumerating.
-fn build_sources(docker: Arc<DockerClient>, compose_project: String) -> WsSources {
+fn build_sources(docker: Arc<DockerClient>, path: PathBuf) -> WsSources {
     let info = {
         let docker = docker.clone();
         Gatherer::spawn(PERIOD, move || {
             let docker = docker.clone();
-            let compose_project = compose_project.clone();
+            let path = path.clone();
             async move {
                 let containers = docker
-                    .compose_container_info(&compose_project)
+                    .workspace_compose_info(&path)
                     .await
                     .unwrap_or_default();
                 let status = match containers.iter().map(|c| c.state).max() {

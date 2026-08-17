@@ -1,7 +1,10 @@
-use std::path::PathBuf;
+use std::path::{Component, Path, PathBuf};
 
-use docker::{MANAGED_LABEL, PROJECT_LABEL, WORKSPACE_LABEL};
+use docker::{
+    COMPOSE_PROJECT_LABEL, LOCAL_FOLDER_LABEL, MANAGED_LABEL, PROJECT_LABEL, WORKSPACE_LABEL,
+};
 use eyre::{Context, eyre};
+use indexmap::IndexMap;
 use serde_json::json;
 
 use crate::{state::DevcontainerState, workspace::Workspace};
@@ -23,37 +26,211 @@ pub(crate) fn remove_override_file(workspace: &Workspace) {
     }
 }
 
-/// `docker compose` pointed at the workspace's own compose files, without our
-/// override. Enough for read-only queries; anything that starts containers
-/// wants [`compose_cmd`].
-fn compose_base_cmd(
+/// The directory containing the `devcontainer.json` file, used as a reference for
+/// `dockerComposeFile`.
+///
+/// The config must be the workspace's own — every caller loads it with
+/// [`State::devcontainer_for`](crate::state::State::devcontainer_for). A project
+/// configured entirely from `config.toml` has no devcontainer.json to be
+/// relative to, so those paths resolve against the workspace root.
+fn config_dir(devcontainer: &DevcontainerState, workspace: &Workspace) -> PathBuf {
+    devcontainer
+        .labels
+        .config_file()
+        .and_then(Path::parent)
+        .map_or_else(|| workspace.path.clone(), Path::to_path_buf)
+}
+
+/// Lexically fold away `.` and `..`, without resolving symlinks or hitting the filesystem.
+///
+/// This is how the reference implemenation resolves compose paths.
+fn normalize_compose_path(path: &Path) -> PathBuf {
+    let mut out = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                if !out.pop() {
+                    out.push("..");
+                }
+            }
+            other => out.push(other),
+        }
+    }
+    out
+}
+
+/// The workspace's compose files, absolute and normalized.
+pub(crate) fn compose_files(
+    devcontainer: &DevcontainerState,
+    workspace: &Workspace,
+) -> eyre::Result<Vec<PathBuf>> {
+    let context = devcontainer.context(&workspace.path);
+    let dir = config_dir(devcontainer, workspace);
+
+    devcontainer
+        .config
+        .docker_compose_file
+        .iter()
+        .map(|f| {
+            let f = context.render_path("dockerComposeFile", f)?;
+            Ok(normalize_compose_path(&dir.join(f)))
+        })
+        .collect()
+}
+
+/// Sanitize a project name the way docker compose (>= 1.21) and the reference
+/// implementation's `toProjectName` do: lowercase, keeping only `[a-z0-9-_]`.
+pub(crate) fn to_project_name(raw: &str) -> String {
+    raw.to_lowercase()
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
+        .collect()
+}
+
+/// The project name docker compose picks on its own, from the basename of the
+/// project directory (the folder holding the first compose file).
+fn default_project_name(first_compose_file: &Path) -> String {
+    first_compose_file
+        .parent()
+        .and_then(Path::file_name)
+        .map(|name| to_project_name(&name.to_string_lossy()))
+        .unwrap_or_default()
+}
+
+/// The project name from the workspace and compose file layout alone.
+fn derive_project_name(workspace_path: &Path, first_compose_file: &Path) -> String {
+    let Some(working_dir) = first_compose_file.parent() else {
+        return String::new();
+    };
+
+    if working_dir == workspace_path.join(".devcontainer") {
+        let basename = workspace_path
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy();
+        to_project_name(&format!("{basename}_devcontainer"))
+    } else {
+        default_project_name(first_compose_file)
+    }
+}
+
+/// A `name:` set by the compose files themselves, if any.
+///
+/// Read from `docker compose config` (without `-p`, so compose reports what it
+/// would pick unprompted) rather than by parsing the files, so that `name:` in
+/// any fragment, `COMPOSE_PROJECT_NAME` in the project directory's `.env`, and
+/// variable interpolation all resolve exactly as they will for anyone else
+/// running compose here. Compose falls back to the project directory's
+/// basename, which says nothing, so that answer is discarded.
+async fn configured_project_name(files: &[PathBuf]) -> eyre::Result<Option<String>> {
+    let mut cmd = tokio::process::Command::new("docker");
+    cmd.arg("compose");
+    for f in files {
+        cmd.arg("-f").arg(f);
+    }
+    cmd.args(["config", "--format", "json"]);
+
+    let out = cmd
+        .output()
+        .await
+        .wrap_err("failed to run docker compose")?;
+    eyre::ensure!(
+        out.status.success(),
+        "docker compose config failed: {}",
+        String::from_utf8_lossy(&out.stderr).trim()
+    );
+
+    let config: serde_json::Value = serde_json::from_slice(&out.stdout)?;
+    let Some(name) = config.get("name").and_then(serde_json::Value::as_str) else {
+        return Ok(None);
+    };
+
+    let name = to_project_name(name);
+    let default = files.first().map(|f| default_project_name(f));
+    Ok((!name.is_empty() && Some(&name) != default.as_ref()).then_some(name))
+}
+
+async fn resolve_project_name(
+    devcontainer: &DevcontainerState,
+    workspace: &Workspace<'_>,
+) -> eyre::Result<String> {
+    // The environment wins, for us as for compose itself.
+    if let Some(name) = std::env::var_os("COMPOSE_PROJECT_NAME") {
+        let name = to_project_name(&name.to_string_lossy());
+        if !name.is_empty() {
+            return Ok(name);
+        }
+    }
+
+    let files = compose_files(devcontainer, workspace)?;
+    let first = files
+        .first()
+        .ok_or_else(|| eyre!("devcontainer.json has no dockerComposeFile"))?;
+    let derived = derive_project_name(&workspace.path, first);
+
+    match configured_project_name(&files).await {
+        Ok(Some(name)) => Ok(name),
+        Ok(None) => Ok(derived),
+        Err(e) => {
+            // Nothing else works if the compose files are unreadable, but this
+            // is not the place to report it: fall back so that the caller fails
+            // on its own compose command, with compose's own message.
+            tracing::debug!("could not read the compose configuration: {e:#}");
+            Ok(derived)
+        }
+    }
+}
+
+/// The compose project name for this workspace.
+///
+/// Derived the way the devcontainer reference implementation derives it (`getProjectName` in
+/// devcontainers/cli's `dockerCompose.ts`). We need to respect the reference here so that our
+/// containers are recognized by other tools (e.g. VS Code).
+pub(crate) async fn project_name<'a>(
+    devcontainer: &'a DevcontainerState,
+    workspace: &Workspace<'_>,
+) -> eyre::Result<&'a str> {
+    devcontainer
+        .compose_project
+        .get_or_try_init(|| resolve_project_name(devcontainer, workspace))
+        .await
+        .map(String::as_str)
+}
+
+/// `docker compose` pointed at the workspace's own compose files, with no
+/// project name and without our override. Enough for questions the project name
+/// has no bearing on; anything that touches containers wants [`compose_cmd`].
+fn compose_config_cmd(
     devcontainer: &DevcontainerState,
     workspace: &Workspace,
 ) -> eyre::Result<tokio::process::Command> {
     let mut cmd = tokio::process::Command::new("docker");
+    cmd.arg("compose");
 
-    cmd.args(["compose", "-p"])
-        .arg(workspace.compose_project_name());
-
-    let context = devcontainer.context(&workspace.path);
-    for f in &devcontainer.config.docker_compose_file {
-        let f = context.render_path("dockerComposeFile", f)?;
-        cmd.arg("-f")
-            .arg(workspace.path.join(".devcontainer").join(f));
+    for f in compose_files(devcontainer, workspace)? {
+        cmd.arg("-f").arg(f);
     }
 
     Ok(cmd)
 }
 
 /// Write the compose override and return docker compose base args.
-pub(crate) fn compose_cmd(
+pub(crate) async fn compose_cmd(
     devcontainer: &DevcontainerState,
-    workspace: &Workspace,
+    workspace: &Workspace<'_>,
 ) -> eyre::Result<tokio::process::Command> {
     let override_file_path = write_compose_override(devcontainer, workspace)?;
 
-    let mut cmd = compose_base_cmd(devcontainer, workspace)?;
+    let mut cmd = tokio::process::Command::new("docker");
+    cmd.args(["compose", "-p"])
+        .arg(project_name(devcontainer, workspace).await?);
+
+    for f in compose_files(devcontainer, workspace)? {
+        cmd.arg("-f").arg(f);
+    }
     cmd.arg("-f").arg(override_file_path);
+
     Ok(cmd)
 }
 
@@ -66,7 +243,7 @@ pub(crate) async fn compose_services(
     devcontainer: &DevcontainerState,
     workspace: &Workspace<'_>,
 ) -> eyre::Result<Vec<String>> {
-    let mut cmd = compose_base_cmd(devcontainer, workspace)?;
+    let mut cmd = compose_config_cmd(devcontainer, workspace)?;
     cmd.args(["config", "--services"]);
 
     let out = cmd
@@ -93,7 +270,7 @@ pub(crate) async fn compose_ps_q(
     devcontainer: &DevcontainerState,
     workspace: &Workspace<'_>,
 ) -> eyre::Result<String> {
-    let mut cmd = compose_cmd(devcontainer, workspace)?;
+    let mut cmd = compose_cmd(devcontainer, workspace).await?;
 
     let service = &devcontainer.config.service;
     cmd.arg("ps").arg("-q").arg(service);
@@ -106,6 +283,75 @@ pub(crate) async fn compose_ps_q(
         return Err(eyre!("no container found for service '{}'", service));
     }
     Ok(id)
+}
+
+/// Describe the workspace a container belongs to, when it is not this one.
+///
+/// The compose project name comes from the worktree folder name, which is only
+/// unique within a project — so two projects with a workspace of the same name
+/// land in one compose project, where `up --remove-orphans` and `down -v`
+/// operate on each other's containers.
+fn foreign_claim(
+    labels: &IndexMap<String, String>,
+    project: &str,
+    workspace: &str,
+    local_folder: &Path,
+) -> Option<String> {
+    let claim_project = labels.get(PROJECT_LABEL);
+    let claim_workspace = labels.get(WORKSPACE_LABEL);
+    let claim_folder = labels.get(LOCAL_FOLDER_LABEL);
+
+    let foreign = claim_project.is_some_and(|p| p != project)
+        || claim_workspace.is_some_and(|w| w != workspace)
+        // A container some other tool started carries no labels of ours, but
+        // the devcontainer spec's own label still says which folder it is for.
+        || claim_folder.is_some_and(|f| Path::new(f) != local_folder);
+
+    if !foreign {
+        return None;
+    }
+
+    Some(match (claim_project, claim_workspace, claim_folder) {
+        (Some(project), Some(workspace), _) => {
+            format!("project '{project}' (workspace '{workspace}')")
+        }
+        (Some(project), None, _) => format!("project '{project}'"),
+        (None, _, Some(folder)) => format!("the devcontainer for {folder}"),
+        (None, _, None) => "another workspace".to_string(),
+    })
+}
+
+/// Refuse to run compose against a project name another workspace has claimed.
+pub(crate) async fn ensure_project_unclaimed(
+    devcontainer: &DevcontainerState,
+    workspace: &Workspace<'_>,
+    project_name: &str,
+) -> eyre::Result<()> {
+    let client = &devcontainer.docker().await?.client;
+
+    let containers = client
+        .list_containers()
+        .all(true)
+        .with_label(COMPOSE_PROJECT_LABEL, project_name)
+        .call()
+        .await?;
+
+    for c in containers {
+        if let Some(claim) = foreign_claim(
+            &c.labels,
+            workspace.state.project_name.as_str(),
+            &workspace.name,
+            &workspace.path,
+        ) {
+            return Err(eyre!(
+                "The compose project '{project_name}' already belongs to {claim}\n\n\
+                 Two workspaces even of different projects cannot share a name, as the devcontainer
+                 convention uses the worktree folder name only."
+            ));
+        }
+    }
+
+    Ok(())
 }
 
 /// Generate a compose override file
@@ -215,4 +461,111 @@ fn write_compose_override(
     std::fs::write(&override_path, content)
         .wrap_err_with(|| format!("failed to write {}", override_path.display()))?;
     Ok(override_path)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn derive(workspace: &str, compose_file: &str) -> String {
+        derive_project_name(
+            Path::new(workspace),
+            &normalize_compose_path(Path::new(compose_file)),
+        )
+    }
+
+    /// Each case is what the devcontainers CLI computes for the same layout.
+    #[test]
+    fn the_devcontainer_suffix_only_applies_inside_dot_devcontainer() {
+        // .devcontainer/devcontainer.json + "docker-compose.yml"
+        assert_eq!(
+            derive("/w/fix", "/w/fix/.devcontainer/docker-compose.yml"),
+            "fix_devcontainer"
+        );
+        // .devcontainer/devcontainer.json + "../docker-compose.yml"
+        assert_eq!(
+            derive("/w/fix", "/w/fix/.devcontainer/../docker-compose.yml"),
+            "fix"
+        );
+        // .devcontainer.json at the workspace root + "docker-compose.yml"
+        assert_eq!(derive("/w/fix", "/w/fix/docker-compose.yml"), "fix");
+        // .devcontainer/sub/devcontainer.json + "docker-compose.yml"
+        assert_eq!(
+            derive("/w/fix", "/w/fix/.devcontainer/sub/docker-compose.yml"),
+            "sub"
+        );
+    }
+
+    #[test]
+    fn project_names_are_sanitized() {
+        assert_eq!(
+            derive("/w/Fix.1", "/w/Fix.1/.devcontainer/c.yml"),
+            "fix1_devcontainer"
+        );
+        assert_eq!(to_project_name("A b-c_d.e"), "ab-c_de");
+    }
+
+    #[test]
+    fn compose_default_name_is_the_project_directory() {
+        assert_eq!(
+            default_project_name(Path::new("/w/fix/.devcontainer/docker-compose.yml")),
+            "devcontainer"
+        );
+        assert_eq!(
+            default_project_name(Path::new("/w/fix/docker-compose.yml")),
+            "fix"
+        );
+    }
+
+    fn labels(pairs: &[(&str, &str)]) -> IndexMap<String, String> {
+        pairs
+            .iter()
+            .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
+            .collect()
+    }
+
+    fn claim(pairs: &[(&str, &str)]) -> Option<String> {
+        foreign_claim(&labels(pairs), "proj", "fix", Path::new("/w/fix"))
+    }
+
+    #[test]
+    fn our_own_containers_are_not_a_claim() {
+        assert_eq!(
+            claim(&[
+                (PROJECT_LABEL, "proj"),
+                (WORKSPACE_LABEL, "fix"),
+                (LOCAL_FOLDER_LABEL, "/w/fix"),
+            ]),
+            None
+        );
+        // Started by another tool, for this same folder.
+        assert_eq!(claim(&[(LOCAL_FOLDER_LABEL, "/w/fix")]), None);
+        // Nothing we can attribute.
+        assert_eq!(claim(&[]), None);
+    }
+
+    #[test]
+    fn another_project_is_a_claim() {
+        assert_eq!(
+            claim(&[(PROJECT_LABEL, "other"), (WORKSPACE_LABEL, "fix")]),
+            Some("project 'other' (workspace 'fix')".to_string())
+        );
+    }
+
+    /// `Foo` and `foo` sanitize to one project name.
+    #[test]
+    fn a_case_folded_workspace_is_a_claim() {
+        assert_eq!(
+            claim(&[(PROJECT_LABEL, "proj"), (WORKSPACE_LABEL, "Fix")]),
+            Some("project 'proj' (workspace 'Fix')".to_string())
+        );
+    }
+
+    #[test]
+    fn another_tools_container_for_another_folder_is_a_claim() {
+        assert_eq!(
+            claim(&[(LOCAL_FOLDER_LABEL, "/elsewhere/fix")]),
+            Some("the devcontainer for /elsewhere/fix".to_string())
+        );
+    }
 }

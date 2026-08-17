@@ -11,7 +11,7 @@ use crate::cli::fwd::forward;
 use crate::cli::{State, go, proxy};
 use crate::complete::complete_workspace;
 use crate::config::Config;
-use crate::docker::compose::{compose_cmd, compose_ps_q};
+use crate::docker::compose::{self, compose_cmd, compose_ps_q};
 use crate::docker::probe;
 use crate::run::cmd::NamedCmd;
 use crate::run::{self, Runner};
@@ -131,7 +131,10 @@ impl Up {
             proxy::ensure_up(proxy).await?;
         }
 
-        let mut compose_up_cmd = compose_cmd(devcontainer, workspace)?;
+        let project_name = compose::project_name(devcontainer, workspace).await?;
+        compose::ensure_project_unclaimed(devcontainer, workspace, project_name).await?;
+
+        let mut compose_up_cmd = compose_cmd(devcontainer, workspace).await?;
         compose_up_cmd.args(["up", "-d", "--build", "--remove-orphans"]);
 
         if let Some(ref services) = devcontainer.config.run_services {

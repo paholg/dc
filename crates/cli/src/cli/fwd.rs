@@ -84,7 +84,7 @@ pub(crate) async fn forward(
             .ensure_image(SOCAT_IMAGE)
             .await?;
 
-        let volume_name = format!("devconcurrent-fwd-{}", workspace.compose_project_name());
+        let volume_name = format!("devconcurrent-fwd-{}", sidecar_key(workspace));
 
         let mut create = devcontainer
             .docker()
@@ -99,7 +99,6 @@ pub(crate) async fn forward(
         create_inner_sidecar(
             &devcontainer.docker().await?.client,
             workspace,
-            &workspace.compose_project_name(),
             cid,
             &volume_name,
             &available,
@@ -108,7 +107,6 @@ pub(crate) async fn forward(
         create_outer_sidecar(
             &devcontainer.docker().await?.client,
             workspace,
-            &workspace.compose_project_name(),
             cid,
             &network_name,
             &volume_name,
@@ -128,6 +126,11 @@ pub(crate) async fn forward(
     Ok(())
 }
 
+/// The unique identifier for a fwd sidecar.
+fn sidecar_key(workspace: &Workspace<'_>) -> String {
+    format!("{}-{}", workspace.state.project_name, workspace.name)
+}
+
 async fn container_network(client: &docker::Docker, cid: &str) -> eyre::Result<String> {
     let details = client.inspect_container(cid).await?;
     details
@@ -143,12 +146,11 @@ async fn container_network(client: &docker::Docker, cid: &str) -> eyre::Result<S
 async fn create_inner_sidecar(
     client: &docker::Docker,
     workspace: &Workspace<'_>,
-    compose_project_name: &str,
     cid: &str,
     volume_name: &str,
     ports: &[ForwardPort],
 ) -> eyre::Result<()> {
-    let name = format!("devconcurrent-fwd-inner-{compose_project_name}");
+    let name = format!("devconcurrent-fwd-inner-{}", sidecar_key(workspace));
 
     let socat_cmds: Vec<String> = ports
         .iter()
@@ -184,13 +186,12 @@ async fn create_inner_sidecar(
 async fn create_outer_sidecar(
     client: &docker::Docker,
     workspace: &Workspace<'_>,
-    compose_project_name: &str,
     cid: &str,
     network_name: &str,
     volume_name: &str,
     ports: &[ForwardPort],
 ) -> eyre::Result<()> {
-    let name = format!("devconcurrent-fwd-{compose_project_name}");
+    let name = format!("devconcurrent-fwd-{}", sidecar_key(workspace));
 
     let socat_cmds: Vec<String> = ports
         .iter()

@@ -10,7 +10,7 @@ use crate::cli::go::go;
 use crate::cli::{State, confirm, safety_check};
 use crate::complete::complete_workspace;
 use crate::config::Config;
-use crate::docker::compose::{compose_cmd, remove_override_file};
+use crate::docker::compose::{self, compose_cmd, remove_override_file};
 use crate::run::{self, Runnable, Runner, run_command};
 use crate::state::DevcontainerState;
 use crate::workspace::Workspace;
@@ -103,10 +103,20 @@ impl Runnable for Cleanup<'_> {
 
     async fn run(self, _: run::Token) -> eyre::Result<()> {
         if let Some(devcontainer) = self.devcontainer {
-            let mut down_cmd = compose_cmd(devcontainer, self.workspace)?;
-            down_cmd.args(["down", "-v", "--rmi", "local", "--remove-orphans"]);
+            let project_name = compose::project_name(devcontainer, self.workspace).await?;
 
-            run_command(down_cmd, "docker compose down").await?;
+            match compose::ensure_project_unclaimed(devcontainer, self.workspace, project_name)
+                .await
+            {
+                Ok(()) => {
+                    let mut down_cmd = compose_cmd(devcontainer, self.workspace).await?;
+                    down_cmd.args(["down", "-v", "--rmi", "local", "--remove-orphans"]);
+
+                    run_command(down_cmd, "docker compose down").await?;
+                }
+                Err(e) => tracing::warn!("skipping `docker compose down`: {e:#}"),
+            }
+
             remove_override_file(self.workspace);
 
             // Remove any port-forward sidecars targeting this workspace

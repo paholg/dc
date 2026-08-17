@@ -27,7 +27,7 @@ impl Compose {
         let workspace = state.resolve_workspace(self.workspace).await?;
         let devcontainer = state.devcontainer_for(&workspace.path)?;
 
-        let mut cmd = compose_cmd(&devcontainer, &workspace)?;
+        let mut cmd = compose_cmd(&devcontainer, &workspace).await?;
         cmd.args(&self.args);
 
         Err(cmd.into_std().exec().into())

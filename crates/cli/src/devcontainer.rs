@@ -48,6 +48,10 @@ impl DevcontainerLabels {
         &self.local_folder
     }
 
+    pub(crate) fn config_file(&self) -> Option<&Path> {
+        self.config_file.as_deref()
+    }
+
     pub(crate) fn pairs(&self) -> Vec<(&'static str, String)> {
         let mut pairs = vec![(
             docker::LOCAL_FOLDER_LABEL,

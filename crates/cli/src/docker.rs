@@ -21,6 +21,8 @@ pub(crate) struct ContainerInfo {
     pub(crate) exposed_ports: Vec<u16>,
     /// Compose service name, when the container is part of a compose project.
     pub(crate) service: Option<String>,
+    /// Compose project name, when the container is part of a compose project.
+    pub(crate) compose_project: Option<String>,
 }
 
 /// Raw single-container sample with the CPU counters needed to diff a
@@ -38,6 +40,7 @@ pub(crate) struct StatsSample {
 
 fn container_info_from(c: docker::ContainerSummary) -> ContainerInfo {
     let service = c.labels.get(COMPOSE_SERVICE_LABEL).cloned();
+    let compose_project = c.labels.get(COMPOSE_PROJECT_LABEL).cloned();
     let mut exposed_ports: Vec<u16> = c.ports.iter().map(|p| p.private_port).collect();
     exposed_ports.sort_unstable();
     exposed_ports.dedup();
@@ -46,6 +49,7 @@ fn container_info_from(c: docker::ContainerSummary) -> ContainerInfo {
         state: c.state,
         exposed_ports,
         service,
+        compose_project,
     }
 }
 
@@ -83,6 +87,38 @@ impl DockerClient {
             .call()
             .await?;
         Ok(summaries.into_iter().map(container_info_from).collect())
+    }
+
+    /// The compose project a workspace's containers belong to, read off the
+    /// containers themselves.
+    ///
+    /// Cheaper than deriving the name (which runs `docker compose config`), and
+    /// right even when the stack was started by another tool that resolved the
+    /// name differently. `None` when the workspace has no containers, in which
+    /// case there is nothing to report on anyway.
+    pub(crate) async fn compose_project_for_path(
+        &self,
+        path: &Path,
+    ) -> eyre::Result<Option<String>> {
+        Ok(self
+            .container_info_for_path(path)
+            .await?
+            .into_iter()
+            .find_map(|c| c.compose_project))
+    }
+
+    /// Every container in the workspace's compose project.
+    pub(crate) async fn workspace_compose_info(
+        &self,
+        path: &Path,
+    ) -> eyre::Result<Vec<ContainerInfo>> {
+        let found = self.container_info_for_path(path).await?;
+        let project = found.iter().find_map(|c| c.compose_project.clone());
+
+        match project {
+            Some(project) => self.compose_container_info(&project).await,
+            None => Ok(found),
+        }
     }
 
     /// All containers in a compose project. Unlike the `local_folder` filter,
@@ -201,13 +237,17 @@ impl DockerClient {
     /// project. Containers without a service label or without an IP are omitted.
     pub(crate) async fn workspace_compose_ips(
         &self,
-        workspace: &Workspace<'_>,
+        path: &Path,
     ) -> eyre::Result<Vec<(String, String)>> {
+        let Some(project) = self.compose_project_for_path(path).await? else {
+            return Ok(Vec::new());
+        };
+
         let summaries = self
             .client
             .list_containers()
             .all(true)
-            .with_label(COMPOSE_PROJECT_LABEL, workspace.compose_project_name())
+            .with_label(COMPOSE_PROJECT_LABEL, project)
             .call()
             .await?;
 

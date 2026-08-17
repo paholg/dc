@@ -96,8 +96,7 @@ impl Ports {
 
 async fn get_ports(state: State<'_>) -> eyre::Result<String> {
     let workspace = state.resolve_workspace(None).await?;
-    let devcontainer = state.try_devcontainer()?;
-    let docker = devcontainer.docker().await?;
+    let docker = state.docker().await?;
     let (ports, healthy) = tokio::join!(
         docker.workspace_forwarded_ports(&workspace),
         docker.is_forwarding_healthy(&workspace),
@@ -126,9 +125,8 @@ impl ShowWorkspace {
 
 impl Ip {
     async fn run(self, state: State<'_>) -> eyre::Result<()> {
-        let devcontainer = state.try_devcontainer()?;
         let workspace = state.resolve_workspace(None).await?;
-        let ips = devcontainer
+        let ips = state
             .docker()
             .await?
             .workspace_compose_ips(&workspace.path)
@@ -235,10 +233,10 @@ async fn gather(project: Option<String>) -> eyre::Result<Option<Vec<(String, Str
     let Ok(state) = State::new(project, &config).await else {
         return Ok(None);
     };
-    let Ok(devcontainer) = state.try_devcontainer() else {
+    let Ok(workspace) = state.resolve_workspace(None).await else {
         return Ok(None);
     };
-    let Ok(workspace) = state.resolve_workspace(None).await else {
+    let Ok(devcontainer) = state.devcontainer_for(&workspace.path) else {
         return Ok(None);
     };
     let options = devcontainer.devconcurrent();

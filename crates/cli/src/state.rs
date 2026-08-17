@@ -237,9 +237,16 @@ impl<'a> State<'a> {
         }))
     }
 
-    /// Get the DevcontainerState; if you have a workspace in scope, prefer `devcontainer_for`.
-    pub(crate) fn try_devcontainer(&self) -> eyre::Result<&DevcontainerState> {
+    /// Get the project's DevcontainerState. Anything acting on a workspace wants
+    /// that workspace's own config, from [`devcontainer_for`](Self::devcontainer_for).
+    fn try_devcontainer(&self) -> eyre::Result<&DevcontainerState> {
         self.devcontainer.as_ref().ok_or_else(|| eyre::eyre!("no devcontainer.json found for this project; devcontainer functionality is disabled"))
+    }
+
+    /// The Docker connection, for callers that want the daemon rather than any
+    /// particular workspace's configuration.
+    pub(crate) async fn docker(&self) -> eyre::Result<&Arc<DockerClient>> {
+        self.try_devcontainer()?.docker().await
     }
 
     pub(crate) fn has_devcontainer(&self) -> bool {

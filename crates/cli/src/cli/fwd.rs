@@ -39,8 +39,8 @@ impl Fwd {
         let state = State::new(project, &config).await?;
         match self.command {
             Some(FwdCommands::Stop) => {
-                let devcontainer = state.try_devcontainer()?;
-                remove_sidecars(&state, &devcontainer.docker().await?.client).await
+                let docker = state.docker().await?;
+                remove_sidecars(&state, &docker.client).await
             }
             None => {
                 let workspace = state.resolve_workspace(self.workspace).await?;

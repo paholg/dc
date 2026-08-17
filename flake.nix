@@ -37,12 +37,16 @@
 
         craneLib = (crane.mkLib pkgs).overrideToolchain (p: rust);
 
+        # Member crates set `version.workspace = true`, which crane can't
+        # resolve from a member Cargo.toml alone.
+        workspaceVersion =
+          (builtins.fromTOML (builtins.readFile ./Cargo.toml)).workspace.package.version;
         crateName = craneLib.crateNameFromCargoToml {
           cargoToml = ./crates/cli/Cargo.toml;
-        };
+        } // { version = workspaceVersion; };
         serviceCrateName = craneLib.crateNameFromCargoToml {
           cargoToml = ./crates/proxy/Cargo.toml;
-        };
+        } // { version = workspaceVersion; };
 
         commonArgs = {
           inherit (crateName) pname version;

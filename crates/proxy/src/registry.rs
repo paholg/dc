@@ -84,6 +84,49 @@ impl Registry {
         removed
     }
 
+    /// Reconcile tracked services against the containers docker currently
+    /// reports as running (`cid` → its IP, if it has one).
+    ///
+    /// Entries whose container is absent are dropped and returned, so the
+    /// caller can clean up their sidecars; entries whose IP moved are updated
+    /// in place. This is what makes a lost `die` or `start` event self-heal.
+    pub async fn reconcile_services(
+        &self,
+        alive: &HashMap<String, Option<IpAddr>>,
+    ) -> Vec<RunningService> {
+        let mut inner = self.inner.write().await;
+        let mut dropped = Vec::new();
+        inner.services.retain(|cid, svc| {
+            if alive.contains_key(cid) {
+                return true;
+            }
+            dropped.push(svc.clone());
+            false
+        });
+        let mut moved = false;
+        for (cid, svc) in &mut inner.services {
+            let Some(Some(ip)) = alive.get(cid) else {
+                continue;
+            };
+            if svc.container_ip != *ip {
+                tracing::info!(
+                    project = svc.project,
+                    workspace = svc.workspace,
+                    service = svc.service,
+                    old = %svc.container_ip,
+                    new = %ip,
+                    "container IP changed"
+                );
+                svc.container_ip = *ip;
+                moved = true;
+            }
+        }
+        if moved || !dropped.is_empty() {
+            rebuild_names(&mut inner);
+        }
+        dropped
+    }
+
     /// Lookup a hostname → IP for DNS. The caller is expected to have already
     /// lowercased the host and trimmed any trailing dot.
     ///

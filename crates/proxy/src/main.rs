@@ -70,12 +70,10 @@ async fn main() -> Result<()> {
     info!(count = configs.len(), "loaded project configs");
     registry.load_configs(configs).await;
 
-    // Adopt any already-running service containers as if they'd just started.
-    events::bootstrap(&docker, &registry, ca.as_ref()).await?;
-    // Drop sidecars whose targets no longer exist.
-    if let Err(e) = sidecar::sweep_orphans(&docker).await {
-        tracing::warn!("orphan sweep failed: {e:?}");
-    }
+    // Already-running service containers are adopted, and sidecars left over
+    // from a previous run are dropped, by the event loop's first resync —
+    // which runs after it subscribes, so nothing that happens during startup
+    // falls between the two.
 
     // All interfaces: the port is published by the CLI, which is where the
     // host-side listen address is restricted.

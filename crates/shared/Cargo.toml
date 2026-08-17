@@ -1,6 +1,6 @@
 [package]
 name = "shared"
-version = "0.0.0"
+version.workspace = true
 edition = "2024"
 description = "Wire format types shared between the devconcurrent CLI and the devconcurrent-proxy service"
 publish = false

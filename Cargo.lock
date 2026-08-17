@@ -1083,7 +1083,7 @@ dependencies = [
 
 [[package]]
 name = "docker"
-version = "0.0.0"
+version = "0.0.25"
 dependencies = [
  "bon",
  "bytes",
@@ -1394,7 +1394,7 @@ dependencies = [
 
 [[package]]
 name = "gen"
-version = "0.0.0"
+version = "0.0.25"
 dependencies = [
  "clap-markdown",
  "devconcurrent",
@@ -4138,7 +4138,7 @@ dependencies = [
 
 [[package]]
 name = "shared"
-version = "0.0.0"
+version = "0.0.25"
 dependencies = [
  "handlebars",
  "http",

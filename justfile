@@ -66,14 +66,16 @@ lint:
     tombi lint
     rumdl check
 
-release version:
+# Relase; pass any valid `set-version` args. Example: just release --bump minor
+release *args:
     git diff --exit-code
-    cargo set-version -p devconcurrent -p devconcurrent-proxy {{version}}
+    cargo set-version {{args}}
     just check
-    git add -u
-    git commit -m "Version {{version}}"
-    git tag v{{version}}
-    git push
+    v=$(cargo pkgid -p devconcurrent | sed 's/.*[@#]//'); \
+    git add -u && \
+    git commit -m "Version $v" && \
+    git tag "v$v" && \
+    git push && \
     git push --tags
 
 schema: schema-gen schema-open

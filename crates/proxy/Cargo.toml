@@ -1,15 +1,17 @@
 [package]
 name = "devconcurrent-proxy"
-version = "0.0.25"
-edition = "2024"
+version.workspace = true
+edition.workspace = true
 description = "DNS resolver for devconcurrent devcontainers"
+homepage.workspace = true
+repository.workspace = true
 publish = false
 
 [dependencies]
 async-trait = "0.1.92"
 axum = "0.8.9"
 axum-reverse-proxy = { version = "1.3.0", default-features = false }
-docker = { path = "../docker", version = "0.0.0" }
+docker = { path = "../docker" }
 eyre = "0.6.14"
 fqdn = "0.5.2"
 fqdn-trie = "0.5.0"

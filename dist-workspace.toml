@@ -24,7 +24,7 @@ install-path = "CARGO_HOME"
 publish-jobs = ["homebrew"]
 # Push the service image before the release is created, so a CLI version never
 # exists without the image it expects.
-global-artifacts-jobs = ["./release-image"]
+local-artifacts-jobs = ["./release-image"]
 # Whether to install an updater program
 install-updater = true
 

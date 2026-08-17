@@ -1,6 +1,6 @@
-# Called by dist's release.yml as a `global-artifacts-jobs` hook, so the image
-# is published before the GitHub Release exists. A failure here means no
-# release, no installers, and no homebrew formula for that version.
+# Called by dist's release.yml as a hook, so the image is published before the
+# GitHub Release exists. A failure here means no release, no installers, and no
+# homebrew formula for that version.
 name: Release image
 
 on:

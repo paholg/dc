@@ -470,24 +470,31 @@ fn write_compose_override(
 
     let devconcurrent_options = devcontainer.devconcurrent();
 
-    let mut volumes: Vec<String> = devcontainer
+    let mut volumes: Vec<serde_json::Value> = devcontainer
         .config
         .mounts
         .iter()
-        .map(|entry| entry.to_compose_volume(&context))
+        .map(|entry| Ok(json!(entry.to_compose_volume(&context)?)))
         .collect::<eyre::Result<_>>()?;
+
     if devconcurrent_options.mount_git() && !workspace.is_root {
+        let bind = |path: &Path| {
+            json!({
+                "type": "bind",
+                "source": path.display().to_string(),
+                "target": path.display().to_string(),
+            })
+        };
+
         // Git worktrees store a tiny `.git` file pointing to the real `.git` dir at the project
         // root; mount the real dir at its original path so `git` works inside the container.
-        let git_dir = workspace.state.project.path.join(".git");
-        let git_dir = git_dir.display();
-        volumes.push(format!("{git_dir}:{git_dir}"));
+        volumes.push(bind(&workspace.state.project.path.join(".git")));
 
         // We also need to mount the workspace at the git-aware path so that certain git commands
         // can find it (such as `git --git-dir=...`).
-        let ws_dir = workspace.path.display();
-        volumes.push(format!("{ws_dir}:{ws_dir}"));
+        volumes.push(bind(&workspace.path));
     }
+
     if !volumes.is_empty() {
         service_obj["volumes"] = json!(volumes);
     }

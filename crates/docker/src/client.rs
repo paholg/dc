@@ -64,6 +64,13 @@ impl Docker {
         &self.socket
     }
 
+    /// The host path to bind-mount into a container so it can reach this
+    /// daemon.
+    #[must_use]
+    pub fn socket_mount_source(&self) -> PathBuf {
+        crate::socket::mount_source(&self.socket)
+    }
+
     /// The API version negotiated with the daemon.
     #[must_use]
     pub fn api_version(&self) -> ApiVersion {

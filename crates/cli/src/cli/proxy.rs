@@ -220,7 +220,9 @@ async fn wait_for_ready(docker: &Docker, id: &str, port: u16) -> Result<()> {
 }
 
 async fn create_proxy_stopped(proxy: &ProxyState) -> Result<String> {
-    let socket_path = proxy.docker.socket().display();
+    // Not necessarily the socket the CLI itself talks to: on Docker Desktop
+    // only the default path is shared into a container.
+    let socket_path = proxy.docker.socket_mount_source();
 
     // The DNS port is published rather than the container sharing the host's
     // network namespace: on macOS and Windows the "host" of a host-networked
@@ -235,7 +237,7 @@ async fn create_proxy_stopped(proxy: &ProxyState) -> Result<String> {
         .with_label(PROXY_GROUP_LABEL, "true")
         .with_label(PROXY_CONFIG_HASH_LABEL, proxy.config_hash())
         .with_bind(PROXY_CONFIG_VOLUME, PROXY_CONFIG_DIR)
-        .with_bind(socket_path, "/var/run/docker.sock")
+        .with_bind(socket_path.display(), "/var/run/docker.sock")
         .with_env(ENV_DNS_PORT, proxy.config.port);
 
     if let Some(ca_root) = &proxy.config.ca_root {

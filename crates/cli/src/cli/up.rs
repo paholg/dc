@@ -318,13 +318,7 @@ impl Up {
             workspace.project_label(),
             workspace.workspace_label(),
         ];
-        uid::build(
-            &update,
-            &base_image,
-            workspace.state.project_working_dir(),
-            &labels,
-        )
-        .await?;
+        uid::build(client, &update, &base_image, &labels).await?;
 
         devcontainer
             .derived_image

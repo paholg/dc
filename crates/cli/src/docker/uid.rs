@@ -10,14 +10,14 @@
 //! [`UPDATE_UID_DOCKERFILE`] safe: at build time there are no bind mounts or
 //! volumes under the home folder, so there is no host data for it to reach.
 
-use std::path::{Path, PathBuf};
+use std::borrow::Cow;
 
+use docker::{Docker, build_single_file_tar};
 use eyre::WrapErr;
 
 use crate::devcontainer::DevcontainerConfig;
 use crate::docker::compose::to_project_name;
-use crate::run::Runner;
-use crate::run::cmd::NamedCmd;
+use crate::run::{Runnable, Runner, Token};
 
 const UPDATE_UID_DOCKERFILE: &str = include_str!("updateUID.Dockerfile");
 
@@ -138,62 +138,71 @@ pub(crate) fn host_ids() -> (u32, u32) {
 
 /// Build the derived image.
 ///
-/// The context is an empty directory: the Dockerfile only ever touches the base
+/// The context holds nothing but the Dockerfile: it only ever touches the base
 /// image's own filesystem, so sending the project would be pure upload cost.
 ///
 /// The layer is one `RUN` keyed on the build args, so an unchanged uid/gid over
 /// an unchanged base is a cache hit — this runs on every `dc up`.
 pub(crate) async fn build(
+    client: &Docker,
     update: &UidUpdate,
     base_image: &str,
-    working_dir: &Path,
     labels: &[(&str, &str)],
 ) -> eyre::Result<()> {
-    let (dockerfile, context) = write_build_inputs(working_dir)?;
-
-    let mut cmd = tokio::process::Command::new("docker");
-    cmd.arg("build")
-        .arg("-f")
-        .arg(&dockerfile)
-        .args(["-t", &update.fixed_image]);
-    if let Some(platform) = &update.platform {
-        cmd.args(["--platform", platform]);
-    }
-    for (key, value) in labels {
-        cmd.args(["--label", &format!("{key}={value}")]);
-    }
-    for arg in [
-        format!("BASE_IMAGE={base_image}"),
-        format!("REMOTE_USER={}", update.remote_user),
-        format!("NEW_UID={}", update.new_uid),
-        format!("NEW_GID={}", update.new_gid),
-        format!("IMAGE_USER={}", update.image_user),
-    ] {
-        cmd.args(["--build-arg", &arg]);
-    }
-    cmd.arg(&context);
-
-    let cmd = cmd.into_std().into();
-    Runner::run(NamedCmd {
-        name: "updateRemoteUserUID",
-        cmd: &cmd,
-        dir: None,
+    Runner::run(BuildDerivedImage {
+        client,
+        update,
+        base_image,
+        labels,
     })
     .await
 }
 
-fn write_build_inputs(working_dir: &Path) -> eyre::Result<(PathBuf, PathBuf)> {
-    let dockerfile = working_dir.join("updateUID.Dockerfile");
-    // Named with a leading dot so it can't collide with a worktree, which
-    // `State::worktree_path` also puts directly in the working dir.
-    let context = working_dir.join(".uid-build-context");
+/// Build the image using the docker API.
+struct BuildDerivedImage<'a> {
+    client: &'a Docker,
+    update: &'a UidUpdate,
+    base_image: &'a str,
+    labels: &'a [(&'a str, &'a str)],
+}
 
-    std::fs::create_dir_all(&context)
-        .wrap_err_with(|| format!("failed to create {}", context.display()))?;
-    std::fs::write(&dockerfile, UPDATE_UID_DOCKERFILE)
-        .wrap_err_with(|| format!("failed to write {}", dockerfile.display()))?;
+impl Runnable for BuildDerivedImage<'_> {
+    fn name(&self) -> Cow<'_, str> {
+        "updateRemoteUserUID".into()
+    }
 
-    Ok((dockerfile, context))
+    fn description(&self) -> Cow<'_, str> {
+        format!("build {}", self.update.fixed_image).into()
+    }
+
+    async fn run(self, _: Token) -> eyre::Result<()> {
+        // Same level and field the process runner reports command output with,
+        // so a build looks the same as it did when this shelled out.
+        let mut report = |line: &str| tracing::trace!(stdout = true, "{line}");
+
+        let mut build = self
+            .client
+            .build_image(&self.update.fixed_image)
+            .context(build_single_file_tar(
+                "Dockerfile",
+                UPDATE_UID_DOCKERFILE.as_bytes(),
+            ))
+            .maybe_platform(self.update.platform.as_deref())
+            .on_output(&mut report)
+            .with_build_arg("BASE_IMAGE", self.base_image)
+            .with_build_arg("REMOTE_USER", &self.update.remote_user)
+            .with_build_arg("NEW_UID", self.update.new_uid.to_string())
+            .with_build_arg("NEW_GID", self.update.new_gid.to_string())
+            .with_build_arg("IMAGE_USER", &self.update.image_user);
+        for (key, value) in self.labels {
+            build = build.with_label(*key, *value);
+        }
+
+        build
+            .call()
+            .await
+            .wrap_err_with(|| format!("failed to build {}", self.update.fixed_image))
+    }
 }
 
 #[cfg(test)]
@@ -339,6 +348,7 @@ mod tests {
 /// makes the host-side uid of a container-owned file something else entirely.
 #[cfg(all(test, feature = "docker-tests"))]
 mod docker_tests {
+    use docker::test_support::repo_tag_names;
     use rand::distr::{Alphanumeric, SampleString};
 
     use super::*;
@@ -384,27 +394,24 @@ mod docker_tests {
 
     /// An alpine image with a uid-1000 `dev` user, a file in its home, and
     /// `USER dev` — i.e. the shape of devcontainer image this feature exists for.
-    fn build_base_image(dir: &std::path::Path) -> (String, ImageCleanup) {
+    async fn build_base_image(client: &Docker) -> (String, ImageCleanup) {
         let tag = unique_tag("base");
-        std::fs::write(
-            dir.join("Dockerfile"),
-            format!(
-                "FROM alpine:3.20\n\
-                 RUN adduser -D -u {OLD_UID} dev \\\n\
-                 && install -o dev -g dev /dev/null /home/dev/owned\n\
-                 USER dev\n"
-            ),
-        )
-        .expect("write base Dockerfile");
+        let dockerfile = format!(
+            "FROM alpine:3.20\n\
+             RUN adduser -D -u {OLD_UID} dev \\\n\
+             && install -o dev -g dev /dev/null /home/dev/owned\n\
+             USER dev\n"
+        );
+        let (key, value) = TEST_LABEL.split_once('=').expect("TEST_LABEL is key=value");
 
-        docker(&[
-            "build",
-            "--label",
-            TEST_LABEL,
-            "-t",
-            &tag,
-            dir.to_str().expect("utf-8 tempdir"),
-        ]);
+        client
+            .build_image(&tag)
+            .context(build_single_file_tar("Dockerfile", dockerfile.as_bytes()))
+            .with_label(key, value)
+            .call()
+            .await
+            .expect("build the base image");
+
         (tag.clone(), ImageCleanup(tag))
     }
 
@@ -436,13 +443,13 @@ mod docker_tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn remaps_the_remote_user_without_touching_mounted_host_data() {
-        let work = tempfile::tempdir().expect("tempdir");
-        let (base_image, _base_guard) = build_base_image(work.path());
+        let client = Docker::connect().await.expect("connect");
+        let (base_image, _base_guard) = build_base_image(&client).await;
 
         let fixed_tag = unique_tag("fixed");
         let _fixed_guard = ImageCleanup(fixed_tag.clone());
         let update = update(fixed_tag.clone());
-        build(&update, &base_image, work.path(), &test_labels())
+        build(&client, &update, &base_image, &test_labels())
             .await
             .expect("build the uid layer");
 
@@ -510,8 +517,8 @@ mod docker_tests {
     /// has to actually stamp them on.
     #[tokio::test(flavor = "multi_thread")]
     async fn the_derived_image_is_labelled_for_destroy_to_find() {
-        let work = tempfile::tempdir().expect("tempdir");
-        let (base_image, _base_guard) = build_base_image(work.path());
+        let client = Docker::connect().await.expect("connect");
+        let (base_image, _base_guard) = build_base_image(&client).await;
 
         let fixed_tag = unique_tag("labelled");
         let _fixed_guard = ImageCleanup(fixed_tag.clone());
@@ -520,16 +527,10 @@ mod docker_tests {
             (docker::PROJECT_LABEL, "uid-test-project"),
             (docker::WORKSPACE_LABEL, fixed_tag.as_str()),
         ];
-        build(
-            &update(fixed_tag.clone()),
-            &base_image,
-            work.path(),
-            &labels,
-        )
-        .await
-        .expect("build the uid layer");
+        build(&client, &update(fixed_tag.clone()), &base_image, &labels)
+            .await
+            .expect("build the uid layer");
 
-        let client = docker::Docker::connect().await.expect("connect");
         let found = client
             .list_images()
             .with_label(docker::PROJECT_LABEL, "uid-test-project")
@@ -542,7 +543,7 @@ mod docker_tests {
             found.iter().any(|image| image
                 .repo_tags
                 .iter()
-                .any(|tag| tag.starts_with(&fixed_tag))),
+                .any(|repo_tag| repo_tag_names(repo_tag, &fixed_tag))),
             "the labelled query should find the derived image; got {:?}",
             found.iter().map(|i| &i.repo_tags).collect::<Vec<_>>()
         );
@@ -567,15 +568,15 @@ mod docker_tests {
     /// what stops host-side git choking on the `.git` that `mountGit` shares.
     #[tokio::test(flavor = "multi_thread")]
     async fn container_writes_land_with_host_ownership() {
-        let work = tempfile::tempdir().expect("tempdir");
-        let (base_image, _base_guard) = build_base_image(work.path());
+        let client = Docker::connect().await.expect("connect");
+        let (base_image, _base_guard) = build_base_image(&client).await;
 
         let fixed_tag = unique_tag("fixed");
         let _fixed_guard = ImageCleanup(fixed_tag.clone());
         build(
+            &client,
             &update(fixed_tag.clone()),
             &base_image,
-            work.path(),
             &test_labels(),
         )
         .await

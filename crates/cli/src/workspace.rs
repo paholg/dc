@@ -41,17 +41,6 @@ impl<'a> Workspace<'a> {
         Ok(git_status::GitStatus::fetch(&self.path).await?.is_dirty())
     }
 
-    /// Match the devcontainer CLI convention: `{basename}_devcontainer`, lowercased,
-    /// keeping only `[a-z0-9-_]`.
-    pub(crate) fn compose_project_name(&self) -> String {
-        let raw = format!("{}_devcontainer", self.name);
-
-        raw.to_lowercase()
-            .chars()
-            .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
-            .collect()
-    }
-
     pub(crate) fn project_label(&self) -> (&str, &str) {
         (PROJECT_LABEL, &self.state.project_name)
     }

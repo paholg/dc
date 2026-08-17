@@ -28,6 +28,9 @@ pub(crate) struct DevcontainerState {
     /// inspect` and a version handshake — around 14ms — which the commands
     /// that only read configuration have no reason to pay.
     docker: OnceCell<Arc<DockerClient>>,
+    /// Resolved on first use: deriving it runs `docker compose config`, and
+    /// several commands ask for it more than once.
+    pub(crate) compose_project: OnceCell<String>,
     pub(crate) labels: DevcontainerLabels,
     /// `workspaceFolder` with its variables resolved. It is what
     /// `${containerWorkspaceFolder}` expands to everywhere else, so it is
@@ -57,6 +60,7 @@ impl DevcontainerState {
         Ok(Self {
             config,
             docker,
+            compose_project: OnceCell::new(),
             labels,
             workspace_folder,
         })
@@ -233,6 +237,7 @@ impl<'a> State<'a> {
         }))
     }
 
+    /// Get the DevcontainerState; if you have a workspace in scope, prefer `devcontainer_for`.
     pub(crate) fn try_devcontainer(&self) -> eyre::Result<&DevcontainerState> {
         self.devcontainer.as_ref().ok_or_else(|| eyre::eyre!("no devcontainer.json found for this project; devcontainer functionality is disabled"))
     }

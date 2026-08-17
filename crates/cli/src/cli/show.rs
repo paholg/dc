@@ -131,7 +131,7 @@ impl Ip {
         let ips = devcontainer
             .docker()
             .await?
-            .workspace_compose_ips(&workspace)
+            .workspace_compose_ips(&workspace.path)
             .await?;
 
         if let Some(service) = self.service {
@@ -151,11 +151,11 @@ impl Ip {
 
 impl Hostname {
     async fn run(self, state: State<'_>) -> eyre::Result<()> {
-        let devcontainer = state.try_devcontainer()?;
         let workspace = state.resolve_workspace(None).await?;
+        let devcontainer = state.devcontainer_for(&workspace.path)?;
         let proxy = &devcontainer.devconcurrent().proxy;
 
-        let services = compose::compose_services(devcontainer, &workspace).await?;
+        let services = compose::compose_services(&devcontainer, &workspace).await?;
 
         let hostname = |service: &str| {
             proxy

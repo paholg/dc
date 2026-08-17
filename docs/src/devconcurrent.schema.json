@@ -192,7 +192,7 @@
           ],
           "default": null
         },
-        "updateRemoteUserUid": {
+        "updateRemoteUserUID": {
           "description": "Controls whether on Linux the container's user should be updated with the local user's UID\nand GID. On by default when opening from a local folder.",
           "type": [
             "boolean",

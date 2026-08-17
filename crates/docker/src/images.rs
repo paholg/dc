@@ -1,7 +1,11 @@
+use bon::bon;
+use indexmap::IndexMap;
 use serde::Deserialize;
 
 use crate::client::Docker;
+use crate::container::null_as_default;
 use crate::error::{ApiSnafu, Result};
+use crate::filter::{Filter, FilterSliceExt};
 use crate::request_ext::ReqwestExt;
 
 /// Subset of `GET /images/{name}/json`
@@ -11,6 +15,80 @@ pub struct ImageDetails {
     pub id: String,
     #[serde(default)]
     pub repo_tags: Vec<String>,
+    #[serde(default)]
+    pub config: ImageConfig,
+    /// OS the image was built for, e.g. `linux`.
+    #[serde(default)]
+    pub os: String,
+    /// CPU architecture, e.g. `amd64`, `arm64`.
+    #[serde(default)]
+    pub architecture: String,
+    /// Architecture variant, e.g. `v8` for `arm64`. Usually absent.
+    #[serde(default)]
+    pub variant: Option<String>,
+}
+
+impl ImageDetails {
+    /// `os/architecture[/variant]`, the form `docker build --platform` wants.
+    /// `None` if the daemon reported neither os nor architecture.
+    #[must_use]
+    pub fn platform(&self) -> Option<String> {
+        let parts: Vec<&str> = [
+            self.os.as_str(),
+            self.architecture.as_str(),
+            self.variant.as_deref().unwrap_or_default(),
+        ]
+        .into_iter()
+        .filter(|part| !part.is_empty())
+        .collect();
+
+        (!parts.is_empty()).then(|| parts.join("/"))
+    }
+}
+
+/// The `Config` block of an image inspect — the image's own defaults, which a
+/// container inherits unless its create options override them.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct ImageConfig {
+    /// The image's default user, as written in the Dockerfile's `USER`. Empty
+    /// when the image doesn't set one, which the daemon reports as root.
+    #[serde(default, deserialize_with = "null_as_default")]
+    pub user: String,
+    #[serde(default, deserialize_with = "null_as_default")]
+    pub env: Vec<String>,
+}
+
+impl ImageConfig {
+    /// Parse [`Self::env`] entries (`"KEY=VALUE"`) into a map. Entries missing
+    /// `=` are skipped.
+    #[must_use]
+    pub fn parsed_env(&self) -> IndexMap<String, String> {
+        self.env
+            .iter()
+            .filter_map(|pair| {
+                let (key, value) = pair.split_once('=')?;
+                Some((key.to_string(), value.to_string()))
+            })
+            .collect()
+    }
+}
+
+/// An image entry from `GET /images/json`.
+///
+/// Note the naming asymmetry with [`ImageDetails`]: the list endpoint reports
+/// labels at the top level, while inspect nests them under `Config`.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct ImageSummary {
+    pub id: String,
+    /// `repo:tag` for each name the image answers to. An image whose tags have
+    /// all been reassigned reports `<none>:<none>` here rather than an empty
+    /// list.
+    #[serde(default, deserialize_with = "null_as_default")]
+    pub repo_tags: Vec<String>,
+    #[serde(default, deserialize_with = "null_as_default")]
+    pub labels: IndexMap<String, String>,
 }
 
 /// One progress event in the NDJSON stream returned by `POST /images/create`.
@@ -70,5 +148,89 @@ impl Docker {
             }
         }
         Ok(())
+    }
+}
+
+#[bon]
+impl Docker {
+    /// `GET /images/json` — list images, optionally narrowed by label filters.
+    ///
+    /// Only tagged, top-level images by default, matching `docker images`.
+    /// Filters are added via [`.with_label()`] on the returned builder.
+    ///
+    /// [`.with_label()`]: DockerListImagesBuilder::with_label
+    #[builder]
+    pub async fn list_images(
+        &self,
+        #[builder(field)] filters: Vec<Filter>,
+        /// Include intermediate layers and untagged images.
+        #[builder(default)]
+        all: bool,
+    ) -> Result<Vec<ImageSummary>> {
+        let mut url = self.url("images/json");
+
+        {
+            let mut pairs = url.query_pairs_mut();
+            if all {
+                pairs.append_pair("all", "true");
+            }
+            if !filters.is_empty() {
+                pairs.append_pair("filters", &filters.to_docker_query());
+            }
+        }
+
+        self.http().get(url).try_send().await
+    }
+}
+
+#[bon]
+impl Docker {
+    /// `DELETE /images/{name}` — remove an image.
+    ///
+    /// Returns [`crate::Error::NotFound`] if the image doesn't exist.
+    ///
+    /// Untagging is not deletion: an image with several tags loses only the
+    /// named one, and the daemon still reports success.
+    #[builder]
+    pub async fn remove_image(
+        &self,
+        #[builder(start_fn)] name: &str,
+        /// Remove even if the image is tagged more than once or is in use by a
+        /// stopped container.
+        #[builder(default)]
+        force: bool,
+        /// Leave untagged parent images behind.
+        #[builder(default)]
+        noprune: bool,
+    ) -> Result<()> {
+        let mut url = self.url(&format!("images/{name}"));
+        {
+            let mut pairs = url.query_pairs_mut();
+            if force {
+                pairs.append_pair("force", "true");
+            }
+            if noprune {
+                pairs.append_pair("noprune", "true");
+            }
+        }
+        self.http().delete(url).try_send_empty().await
+    }
+}
+
+impl<S: docker_list_images_builder::State> DockerListImagesBuilder<'_, S> {
+    pub fn with_label(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
+        self.filters.push(Filter::Label {
+            key: key.into(),
+            value: Some(value.into()),
+        });
+        self
+    }
+
+    pub fn with_label_key(mut self, key: impl Into<String>) -> Self {
+        self.filters.push(Filter::Label {
+            key: key.into(),
+            value: None,
+        });
+        self
     }
 }

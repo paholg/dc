@@ -15,7 +15,7 @@ use crate::request_ext::ReqwestExt;
 /// `encoding/json` marshals a nil map or slice as `null` rather than `{}` or
 /// `[]`, so any collection in a response can arrive as `null`. Bare `default`
 /// only handles missing fields.
-fn null_as_default<'de, T, D>(d: D) -> std::result::Result<T, D::Error>
+pub(crate) fn null_as_default<'de, T, D>(d: D) -> std::result::Result<T, D::Error>
 where
     T: Default + Deserialize<'de>,
     D: Deserializer<'de>,

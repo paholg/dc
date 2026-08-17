@@ -67,9 +67,8 @@ fn cli_markdown() -> String {
     let options = clap_markdown::MarkdownOptions::new()
         .title("CLI".to_string())
         .show_footer(false);
-    let full = clap_markdown::help_markdown_command_custom(&devconcurrent::cli_command(), &options);
 
-    full
+    clap_markdown::help_markdown_command_custom(&devconcurrent::cli_command(), &options)
 }
 
 fn config_markdown() -> eyre::Result<String> {

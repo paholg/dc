@@ -31,6 +31,13 @@ pub(crate) struct DevcontainerState {
     /// Resolved on first use: deriving it runs `docker compose config`, and
     /// several commands ask for it more than once.
     pub(crate) compose_project: OnceCell<String>,
+    /// An image `up` built on top of the service's own for the compose override
+    /// to pin the service to — currently only `updateRemoteUserUID`.
+    ///
+    /// Held here rather than passed to `compose_cmd` because the override is
+    /// rewritten on every call to it, including by `compose_ps_q` after the
+    /// containers are already up, which would drop the pin.
+    pub(crate) derived_image: OnceCell<String>,
     pub(crate) labels: DevcontainerLabels,
     /// `workspaceFolder` with its variables resolved. It is what
     /// `${containerWorkspaceFolder}` expands to everywhere else, so it is
@@ -61,6 +68,7 @@ impl DevcontainerState {
             config,
             docker,
             compose_project: OnceCell::new(),
+            derived_image: OnceCell::new(),
             labels,
             workspace_folder,
         })

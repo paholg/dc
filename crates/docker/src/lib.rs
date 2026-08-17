@@ -32,7 +32,7 @@ pub use error::{Error, Result};
 pub use events::{EventActor, EventMessage, EventsBuilder};
 pub use exec::ExecDetails;
 pub use filter::Filter;
-pub use images::ImageDetails;
+pub use images::{ImageConfig, ImageDetails, ImageSummary};
 pub use socket::discover_socket;
 pub use stats::{ContainerStats, CpuStats, CpuUsage, MemoryStats};
 pub use types::ApiVersion;

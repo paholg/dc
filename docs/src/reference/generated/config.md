@@ -6,4 +6,4 @@
   * `port` (integer) [default: `43770`] — The DNS port the proxy listens on.
   * `caRoot` (string) — Path to your CA root directory on the host. Find it with `mkcert -CAROOT`.
 * `shell` (table) — Shell-integration settings.
-  * `exportEnv` (boolean) [default: `false`] — Register a prompt hook to auto-set the variables from `customizations.devconcurrent.env` based on your current working directory.
+  * `exportEnv` (boolean) [default: `true`] — Register a prompt hook to auto-set the variables from `customizations.devconcurrent.env` based on your current working directory.

@@ -86,7 +86,12 @@ pub(crate) struct Config {
 pub(crate) struct ShellGlobal {
     /// Register a prompt hook to auto-set the variables from `customizations.devconcurrent.env`
     /// based on your current working directory.
+    #[serde(default = "true_fn")]
     pub(crate) export_env: bool,
+}
+
+fn true_fn() -> bool {
+    true
 }
 
 /// Global user proxy settings.

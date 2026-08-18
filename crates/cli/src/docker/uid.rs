@@ -11,12 +11,14 @@
 //! volumes under the home folder, so there is no host data for it to reach.
 
 use std::borrow::Cow;
+use std::path::{Path, PathBuf};
 
 use docker::{Docker, build_single_file_tar};
 use eyre::WrapErr;
 
 use crate::devcontainer::DevcontainerConfig;
 use crate::docker::compose::to_project_name;
+use crate::run::cmd::NamedCmd;
 use crate::run::{Runnable, Runner, Token};
 
 const UPDATE_UID_DOCKERFILE: &str = include_str!("updateUID.Dockerfile");
@@ -142,20 +144,94 @@ pub(crate) fn host_ids() -> (u32, u32) {
 /// image's own filesystem, so sending the project would be pure upload cost.
 ///
 /// The layer is one `RUN` keyed on the build args, so an unchanged uid/gid over
-/// an unchanged base is a cache hit — this runs on every `dc up`.
+/// an unchanged base is a cache hit — this runs on every `dc up`. Which builder
+/// serves that cache depends on the daemon:
+///
+/// - docker: shell out to `docker build`, i.e. BuildKit. The API's `/build` is
+///   the legacy builder, whose cache is keyed on the base image *ID* — and with
+///   the containerd image store that ID is an OCI index digest that BuildKit's
+///   default provenance attestation churns on every `docker compose build`, so
+///   the legacy cache missed on every `up` and re-ran the `chown`. BuildKit's
+///   cache is content-addressed and doesn't care.
+/// - podman: the API's `/build`, which is buildah. Podman has no buildx for a
+///   shell-out to reach (the reason builds moved to the API at all), and no
+///   attestation churn either. The reference CLI lands on the same builder by
+///   shelling out to `podman build`.
 pub(crate) async fn build(
     client: &Docker,
     update: &UidUpdate,
     base_image: &str,
+    working_dir: &Path,
     labels: &[(&str, &str)],
 ) -> eyre::Result<()> {
-    Runner::run(BuildDerivedImage {
-        client,
-        update,
-        base_image,
-        labels,
+    if client.is_podman() {
+        Runner::run(BuildDerivedImage {
+            client,
+            update,
+            base_image,
+            labels,
+        })
+        .await
+    } else {
+        build_via_cli(update, base_image, working_dir, labels).await
+    }
+}
+
+/// Build the image by shelling out to `docker build`.
+async fn build_via_cli(
+    update: &UidUpdate,
+    base_image: &str,
+    working_dir: &Path,
+    labels: &[(&str, &str)],
+) -> eyre::Result<()> {
+    let (dockerfile, context) = write_build_inputs(working_dir)?;
+
+    let mut cmd = tokio::process::Command::new("docker");
+    cmd.arg("build")
+        .arg("-f")
+        .arg(&dockerfile)
+        .args(["-t", &update.fixed_image]);
+    if let Some(platform) = &update.platform {
+        cmd.args(["--platform", platform]);
+    }
+    for (key, value) in labels {
+        cmd.args(["--label", &format!("{key}={value}")]);
+    }
+    for arg in [
+        format!("BASE_IMAGE={base_image}"),
+        format!("REMOTE_USER={}", update.remote_user),
+        format!("NEW_UID={}", update.new_uid),
+        format!("NEW_GID={}", update.new_gid),
+        format!("IMAGE_USER={}", update.image_user),
+    ] {
+        cmd.args(["--build-arg", &arg]);
+    }
+    cmd.arg(&context);
+
+    let cmd = cmd.into_std().into();
+    Runner::run(NamedCmd {
+        name: "updateRemoteUserUID",
+        cmd: &cmd,
+        dir: None,
+        // The service is pinned to this image, so `compose up`'s recreate
+        // decision keys on *its* ID staying stable, not just the base's.
+        env: crate::docker::build_env(),
     })
     .await
+}
+
+fn write_build_inputs(working_dir: &Path) -> eyre::Result<(PathBuf, PathBuf)> {
+    let dockerfile = working_dir.join("updateUID.Dockerfile");
+    // Named with a leading dot so it can't collide with a worktree, which
+    // `State::worktree_path` also puts directly in the working dir.
+    let context = working_dir.join(".uid-build-context");
+
+    std::fs::create_dir_all(&context)
+        .wrap_err_with(|| format!("failed to create {}", context.display()))?;
+    std::fs::write(&dockerfile, UPDATE_UID_DOCKERFILE)
+        .wrap_err_with(|| format!("failed to write {}", dockerfile.display()))?;
+
+    Ok((dockerfile, context))
 }
 
 /// Build the image using the docker API.
@@ -449,9 +525,16 @@ mod docker_tests {
         let fixed_tag = unique_tag("fixed");
         let _fixed_guard = ImageCleanup(fixed_tag.clone());
         let update = update(fixed_tag.clone());
-        build(&client, &update, &base_image, &test_labels())
-            .await
-            .expect("build the uid layer");
+        let working_dir = tempfile::tempdir().expect("tempdir");
+        build(
+            &client,
+            &update,
+            &base_image,
+            working_dir.path(),
+            &test_labels(),
+        )
+        .await
+        .expect("build the uid layer");
 
         // A stand-in for a host directory bind-mounted into the container, at
         // the path a careless `chown -R $HOME` would sweep through. Its
@@ -527,9 +610,16 @@ mod docker_tests {
             (docker::PROJECT_LABEL, "uid-test-project"),
             (docker::WORKSPACE_LABEL, fixed_tag.as_str()),
         ];
-        build(&client, &update(fixed_tag.clone()), &base_image, &labels)
-            .await
-            .expect("build the uid layer");
+        let working_dir = tempfile::tempdir().expect("tempdir");
+        build(
+            &client,
+            &update(fixed_tag.clone()),
+            &base_image,
+            working_dir.path(),
+            &labels,
+        )
+        .await
+        .expect("build the uid layer");
 
         let found = client
             .list_images()
@@ -573,10 +663,12 @@ mod docker_tests {
 
         let fixed_tag = unique_tag("fixed");
         let _fixed_guard = ImageCleanup(fixed_tag.clone());
+        let working_dir = tempfile::tempdir().expect("tempdir");
         build(
             &client,
             &update(fixed_tag.clone()),
             &base_image,
+            working_dir.path(),
             &test_labels(),
         )
         .await

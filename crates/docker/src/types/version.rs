@@ -42,13 +42,24 @@ impl ApiVersion {
 }
 
 /// Daemon's reported supported API range, returned by `GET /version`.
-#[derive(Debug, Clone, Copy, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "PascalCase")]
 pub struct DaemonVersion {
     pub api_version: ApiVersion,
     // PascalCase would give `MinApiVersion`; field is `MinAPIVersion`.
     #[serde(rename = "MinAPIVersion")]
     pub min_api_version: ApiVersion,
+    /// Docker reports an `Engine` component here; podman a `Podman Engine`
+    /// one. Defaulted because the field postdates the endpoint itself.
+    #[serde(default)]
+    pub components: Vec<Component>,
+}
+
+/// One entry of `/version`'s `Components` list.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct Component {
+    pub name: String,
 }
 
 impl DaemonVersion {
@@ -56,6 +67,17 @@ impl DaemonVersion {
     pub async fn probe(http: &reqwest::Client, base: &reqwest::Url) -> Result<Self> {
         let url = base.join("version").expect("base URL valid");
         http.get(url).try_send().await
+    }
+
+    /// Whether the daemon is podman serving the Docker-compatible API.
+    ///
+    /// Podman has named its engine component `Podman Engine` since the compat
+    /// API existed, so a missing or unrecognized list means docker.
+    #[must_use]
+    pub fn is_podman(&self) -> bool {
+        self.components
+            .iter()
+            .any(|c| c.name.to_lowercase().contains("podman"))
     }
 }
 
@@ -131,7 +153,34 @@ mod tests {
         DaemonVersion {
             api_version: ApiVersion::new(max.0, max.1),
             min_api_version: ApiVersion::new(min.0, min.1),
+            components: Vec::new(),
         }
+    }
+
+    /// Trimmed from real `/version` responses of each daemon.
+    #[test]
+    fn detects_the_daemon_flavor() {
+        let docker: DaemonVersion = serde_json::from_str(
+            r#"{"ApiVersion":"1.55","MinAPIVersion":"1.40",
+                "Components":[{"Name":"Engine","Version":"29.6.2"},{"Name":"containerd","Version":"v2.3.3"}]}"#,
+        )
+        .unwrap();
+        assert!(!docker.is_podman());
+
+        let podman: DaemonVersion = serde_json::from_str(
+            r#"{"ApiVersion":"1.41","MinAPIVersion":"1.24",
+                "Components":[{"Name":"Podman Engine","Version":"5.2.2"},{"Name":"Conmon","Version":"conmon version 2.1.12"}]}"#,
+        )
+        .unwrap();
+        assert!(podman.is_podman());
+    }
+
+    /// A daemon predating `Components` is treated as docker.
+    #[test]
+    fn missing_components_means_docker() {
+        let bare: DaemonVersion =
+            serde_json::from_str(r#"{"ApiVersion":"1.41","MinAPIVersion":"1.24"}"#).unwrap();
+        assert!(!bare.is_podman());
     }
 
     #[test]

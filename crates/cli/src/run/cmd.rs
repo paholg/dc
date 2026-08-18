@@ -72,6 +72,8 @@ pub(crate) struct NamedCmd<'a> {
     pub(crate) name: &'a str,
     pub(crate) cmd: &'a Cmd,
     pub(crate) dir: Option<&'a Path>,
+    /// Extra environment for the child, on top of the inherited one.
+    pub(crate) env: &'a [(&'a str, &'a str)],
 }
 
 impl run::Runnable for NamedCmd<'_> {
@@ -89,7 +91,13 @@ impl run::Runnable for NamedCmd<'_> {
             Some(dir) => format!("`{}` in {}", self.cmd.description(), dir.display()),
             None => format!("`{}`", self.cmd.description()),
         };
-        super::run_cmd(&argv, self.dir, &what).await
+        let mut cmd = tokio::process::Command::new(argv[0]);
+        cmd.args(&argv[1..]);
+        if let Some(dir) = self.dir {
+            cmd.current_dir(dir);
+        }
+        cmd.envs(self.env.iter().copied());
+        run::run_command(cmd, &what).await
     }
 }
 

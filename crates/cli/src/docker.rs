@@ -14,6 +14,23 @@ pub(crate) mod compose;
 pub(crate) mod probe;
 pub(crate) mod uid;
 
+/// Environment for the builds we shell out to.
+///
+/// BuildKit's default provenance attestation embeds per-build timestamps, and
+/// with the containerd image store it is part of the digest the image ID is —
+/// so every build moved the ID even when fully cached, and everything keyed on
+/// it (`compose up`'s recreate decision, image-ID caches) saw a new image on
+/// every `dc up`. Local devcontainer images are never pushed anywhere the
+/// attestations could matter. An explicit setting in the user's environment
+/// wins, whatever it says.
+pub(crate) fn build_env() -> &'static [(&'static str, &'static str)] {
+    if std::env::var_os("BUILDX_NO_DEFAULT_ATTESTATIONS").is_some() {
+        &[]
+    } else {
+        &[("BUILDX_NO_DEFAULT_ATTESTATIONS", "1")]
+    }
+}
+
 #[derive(Debug)]
 pub(crate) struct ContainerInfo {
     pub(crate) id: String,

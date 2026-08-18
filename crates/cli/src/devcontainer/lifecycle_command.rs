@@ -52,7 +52,12 @@ impl LifecycleCommand {
     pub(crate) async fn run_on_host(&self, name: &str, dir: Option<&Path>) -> eyre::Result<()> {
         match self {
             LifecycleCommand::Single(cmd) => {
-                let cmd = NamedCmd { name, cmd, dir };
+                let cmd = NamedCmd {
+                    name,
+                    cmd,
+                    dir,
+                    env: &[],
+                };
                 Runner::run(cmd).await
             }
             LifecycleCommand::Parallel(map) => {
@@ -60,6 +65,7 @@ impl LifecycleCommand {
                     name: cmd_name,
                     cmd,
                     dir,
+                    env: &[],
                 });
 
                 Runner::run_parallel(name, execs).await

@@ -149,6 +149,9 @@ impl Up {
             name: "docker compose build",
             cmd: &build_cmd,
             dir: None,
+            // Attestations off, so a fully-cached rebuild keeps its image ID
+            // and the uid layer and `compose up` see an unchanged image.
+            env: crate::docker::build_env(),
         })
         .await?;
 
@@ -166,6 +169,7 @@ impl Up {
             name: "docker compose up",
             cmd: &up_cmd,
             dir: None,
+            env: &[],
         };
         Runner::run(cmd).await?;
 
@@ -318,7 +322,14 @@ impl Up {
             workspace.project_label(),
             workspace.workspace_label(),
         ];
-        uid::build(client, &update, &base_image, &labels).await?;
+        uid::build(
+            client,
+            &update,
+            &base_image,
+            workspace.state.project_working_dir(),
+            &labels,
+        )
+        .await?;
 
         devcontainer
             .derived_image

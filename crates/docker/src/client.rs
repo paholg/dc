@@ -25,6 +25,7 @@ const HOST: &str = "docker";
 pub struct Docker {
     socket: PathBuf,
     api_version: ApiVersion,
+    podman: bool,
     http: reqwest::Client,
     base_url: Url,
 }
@@ -53,6 +54,7 @@ impl Docker {
         Ok(Self {
             socket,
             api_version,
+            podman: daemon.is_podman(),
             http,
             base_url,
         })
@@ -75,6 +77,12 @@ impl Docker {
     #[must_use]
     pub fn api_version(&self) -> ApiVersion {
         self.api_version
+    }
+
+    /// Whether the daemon is podman serving the Docker-compatible API.
+    #[must_use]
+    pub fn is_podman(&self) -> bool {
+        self.podman
     }
 
     pub(crate) fn url(&self, path: &str) -> Url {

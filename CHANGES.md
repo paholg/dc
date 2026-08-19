@@ -93,3 +93,32 @@ The default `worktreeFolder` is now `workspaces/<project>` under the platform
 data directory (previously `<project>` directly under it), keeping generated
 worktrees apart from other state like the CA directory. There is no migration:
 worktrees created under the old default are not found at the new one.
+
+## When two services want the same hostname
+
+The default hostname template is `{{workspace}}.{{service}}.test`, so a name is
+unique per workspace and service — but it carries no project. Two projects with
+a workspace of the same name would render the same hostname.
+
+That particular case can't reach the proxy: `dc up` refuses to run compose
+against a project name another workspace has already claimed, because the
+devcontainer convention derives it from the worktree folder name alone. So two
+workspaces cannot share a name even across projects, and the default template
+cannot collide.
+
+What can still collide:
+
+* A `customizations.devconcurrent.proxy.hostname` template that drops
+  `{{workspace}}` or `{{service}}` — `{{project}}.test`, say, which every
+  service of every workspace in the project renders identically.
+* A per-service `hostname` override that lands on a name another service
+  already renders.
+* Containers brought up outside `dc up`, such as by VS Code, which never pass
+  the project-name check above.
+
+When it happens, the proxy registers one of the colliding services and drops
+the rest from DNS, logging a warning. Which one it keeps is not defined, and it
+can change as containers stop and start — so treat a collision as something to
+fix rather than something to resolve in your favor. You'll see it in
+`dc proxy status`, which marks the losing rows and names the other claimant,
+and in the proxy container's logs.

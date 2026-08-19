@@ -11,6 +11,7 @@
 //!   (if present) is the default; further `:`-segments are silently dropped.
 //! - For no-arg variables, any provided args are ignored.
 //! - Case sensitive; surrounding whitespace inside `${...}` is not tolerated.
+//! - `${env:VAR}` is a synonym of `${localEnv:VAR}`.
 
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -199,6 +200,18 @@ impl Serialize for Template {
     }
 }
 
+/// The description [`Template`] carries in the generated JSON schema.
+const TEMPLATE_DESCRIPTION: &str = "\
+A string that may contain `${...}` variable substitutions. Supported variables: \
+`${localEnv:VAR[:default]}` (alias `${env:VAR[:default]}`), \
+`${containerEnv:VAR[:default]}`, \
+`${localWorkspaceFolder}`, \
+`${containerWorkspaceFolder}`, \
+`${localWorkspaceFolderBasename}`, \
+`${containerWorkspaceFolderBasename}`, \
+`${devcontainerId}`.
+https://containers.dev/implementors/json_reference/#variables-in-devcontainerjson";
+
 impl schemars::JsonSchema for Template {
     fn schema_name() -> std::borrow::Cow<'static, str> {
         "Template".into()
@@ -207,12 +220,7 @@ impl schemars::JsonSchema for Template {
     fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
         schemars::json_schema!({
             "type": "string",
-            "description": "A string that may contain `${...}` variable substitutions. \
-                            Supported variables: `${localEnv:VAR[:default]}`, \
-                            `${containerEnv:VAR[:default]}`, `${localWorkspaceFolder}`, \
-                            `${containerWorkspaceFolder}`, `${localWorkspaceFolderBasename}`, \
-                            `${containerWorkspaceFolderBasename}`, `${devcontainerId}`.\
-                            \nhttps://containers.dev/implementors/json_reference/#variables-in-devcontainerjson",
+            "description": TEMPLATE_DESCRIPTION,
         })
     }
 }
@@ -327,7 +335,8 @@ fn variable(input: &mut &str) -> ModalResult<Variable> {
 
 fn resolve_name(name: &str, args: &[&str]) -> Option<Variable> {
     match name {
-        "localEnv" if !args.is_empty() => Some(Variable::LocalEnv {
+        // The reference implementation treats `env` as a synonym of `localEnv`.
+        "localEnv" | "env" if !args.is_empty() => Some(Variable::LocalEnv {
             name: args[0].to_string(),
             default: args.get(1).map(std::string::ToString::to_string),
         }),
@@ -524,6 +533,22 @@ mod tests {
     }
 
     #[test]
+    fn env_is_local_env() {
+        assert_eq!(
+            Template::parse("${env:HOME:/tmp}").0,
+            vec![var(Variable::LocalEnv {
+                name: "HOME".to_string(),
+                default: Some("/tmp".to_string()),
+            })]
+        );
+    }
+
+    #[test]
+    fn env_without_arg_is_unknown() {
+        assert_eq!(Template::parse("${env}").0, vec![lit("${env}")]);
+    }
+
+    #[test]
     fn extra_colons_dropped() {
         assert_eq!(
             Template::parse("${localEnv:HOME:def:extra}").0,
@@ -670,6 +695,17 @@ mod tests {
     #[test]
     fn render_local_env_missing_no_default_is_empty() {
         assert_eq!(render_with("${localEnv:X}", ContextBuilder::new()), "");
+    }
+
+    #[test]
+    fn render_env_alias() {
+        assert_eq!(
+            render_with(
+                "${env:HOME}",
+                ContextBuilder::new().local_env(&[("HOME", "/home/me")]),
+            ),
+            "/home/me",
+        );
     }
 
     #[test]

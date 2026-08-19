@@ -78,48 +78,24 @@ pub(crate) async fn forward(
         .collect();
 
     if !available.is_empty() {
-        // Get container's network name for the outer sidecar
-        let network_name = container_network(&devcontainer.docker().await?.client, cid).await?;
-
-        devcontainer
-            .docker()
-            .await?
-            .client
-            .ensure_image(SOCAT_IMAGE)
-            .await?;
-
-        let volume_name = shared::container_name(
-            "devconcurrent-fwd-vol",
-            &[workspace.state.project_name.as_str(), &workspace.name],
-        );
-
-        let mut create = devcontainer
-            .docker()
-            .await?
-            .client
-            .create_volume(&volume_name);
-        for (key, value) in workspace.docker_fwd_labels() {
-            create = create.with_label(key.to_owned(), value.to_owned());
+        let client = &devcontainer.docker().await?.client;
+        if let Err(e) = create_sidecars(client, workspace, cid, &available).await {
+            // A port free when we checked can be taken before docker binds it,
+            // and the outer sidecar is the last thing we create — so don't
+            // leave the inner sidecar and the socket volume running.
+            if let Err(cleanup) = remove_sidecars(workspace.state, client).await {
+                tracing::warn!("clean up after failed port forwarding: {cleanup}");
+            }
+            let wanted = available
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join(", ");
+            return Err(e.wrap_err(format!(
+                "failed to forward ports {wanted}; a port that was free when we checked it can \
+                 still be taken before docker binds it"
+            )));
         }
-        create.call().await?;
-
-        create_inner_sidecar(
-            &devcontainer.docker().await?.client,
-            workspace,
-            cid,
-            &volume_name,
-            &available,
-        )
-        .await?;
-        create_outer_sidecar(
-            &devcontainer.docker().await?.client,
-            workspace,
-            cid,
-            &network_name,
-            &volume_name,
-            &available,
-        )
-        .await?;
     }
 
     for (port, &ok) in ports.iter().zip(&free) {
@@ -152,6 +128,33 @@ fn dedup_forward_ports(ports: &[ForwardPort]) -> (Vec<ForwardPort>, Vec<String>)
     }
 
     (kept, warnings)
+}
+
+/// Create the socket volume and both sidecars, in the order they depend on
+/// each other.
+async fn create_sidecars(
+    client: &docker::Docker,
+    workspace: &Workspace<'_>,
+    cid: &str,
+    ports: &[ForwardPort],
+) -> eyre::Result<()> {
+    // The outer sidecar needs the target's network name.
+    let network_name = container_network(client, cid).await?;
+    client.ensure_image(SOCAT_IMAGE).await?;
+
+    let volume_name = shared::container_name(
+        "devconcurrent-fwd-vol",
+        &[workspace.state.project_name.as_str(), &workspace.name],
+    );
+    let mut create = client.create_volume(&volume_name);
+    for (key, value) in workspace.docker_fwd_labels() {
+        create = create.with_label(key.to_owned(), value.to_owned());
+    }
+    create.call().await?;
+
+    create_inner_sidecar(client, workspace, cid, &volume_name, ports).await?;
+    create_outer_sidecar(client, workspace, cid, &network_name, &volume_name, ports).await?;
+    Ok(())
 }
 
 async fn container_network(client: &docker::Docker, cid: &str) -> eyre::Result<String> {
@@ -298,6 +301,12 @@ pub(crate) async fn remove_sidecars(
     Ok(())
 }
 
+/// Best-effort check that we can publish `port` on the host — not a guarantee.
+///
+/// It binds and immediately drops a listener, so anything may take the port
+/// between here and docker binding it for real; `forward` handles that failure
+/// rather than pretending it cannot happen. `127.0.0.1` is what docker binds,
+/// so a port held only on another specific interface does not count as taken.
 fn port_is_free(port: u16) -> bool {
     std::net::TcpListener::bind(("127.0.0.1", port)).is_ok()
 }

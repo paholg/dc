@@ -1,5 +1,5 @@
 use std::collections::BTreeMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use color_eyre::owo_colors::OwoColorize;
 use docker::Docker;
@@ -19,6 +19,7 @@ use crate::workspace::Workspace;
 pub(crate) struct ProxyState {
     pub(crate) docker: Docker,
     pub(crate) config: ProxyGlobal,
+    pub(crate) ca_root: PathBuf,
     pub(crate) options: BTreeMap<String, ProxyOptions>,
     /// The project the command was invoked for. The proxy serves all of them,
     /// so this only narrows what we *report* on.
@@ -64,9 +65,12 @@ impl ProxyState {
             }
         }
 
+        let ca_root = config.proxy.ca_root_dir()?;
+
         Ok(Self {
             docker,
             config: config.proxy.clone(),
+            ca_root,
             options,
             project,
         })
@@ -143,6 +147,7 @@ mod tests {
         ProxyGlobal {
             port,
             ca_root: ca_root.map(PathBuf::from),
+            ..ProxyGlobal::default()
         }
     }
 
@@ -155,7 +160,7 @@ mod tests {
 
     #[test]
     fn hash_is_deterministic_and_a_valid_label_value() {
-        let proxy = proxy(43770, Some("/home/user/.local/share/mkcert"));
+        let proxy = proxy(43770, Some("/home/user/.local/share/devconcurrent/ca"));
         let options = options(&[(
             "proj",
             &json!({
@@ -183,6 +188,15 @@ mod tests {
 
         let ca_root_unset = config_hash(&proxy(43770, None), &options(&[("proj", &enabled)]));
         assert_ne!(base, ca_root_unset);
+
+        let tlds_changed = config_hash(
+            &ProxyGlobal {
+                tlds: vec!["dev".to_string()],
+                ..proxy(43770, Some("/ca"))
+            },
+            &options(&[("proj", &enabled)]),
+        );
+        assert_ne!(base, tlds_changed);
 
         let options_changed = config_hash(
             &proxy(43770, Some("/ca")),

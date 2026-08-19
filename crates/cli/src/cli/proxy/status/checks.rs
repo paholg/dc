@@ -14,13 +14,17 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
-use docker::{ContainerStatus, Docker, PROXY_CONFIG_HASH_LABEL};
+use docker::{ContainerStatus, Docker, PROXY_CA_EXPIRY_LABEL, PROXY_CONFIG_HASH_LABEL};
 use eyre::{Result, WrapErr};
+use jiff::SignedDuration;
 use rustls::pki_types::pem::PemObject;
 use rustls::pki_types::{CertificateDer, ServerName};
 use rustls::{ClientConfig, RootCertStore};
 use serde::Serialize;
-use shared::{ENV_CA_DIR, HTTP_PORT, HTTPS_PORT, PROXY_CONTAINER_NAME, navigation};
+use shared::{
+    ENV_CA_DIR, HTTP_PORT, HTTPS_PORT, PROXY_CONTAINER_NAME, ROOT_CA_KEY_PEM, ROOT_CA_PEM,
+    navigation,
+};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio_rustls::TlsConnector;
@@ -28,7 +32,7 @@ use tokio_rustls::TlsConnector;
 use super::ProxyChecks;
 use super::endpoints::{Endpoint, Sidecar};
 use crate::ansi::{GRAY, GREEN, RED, RESET};
-use crate::cli::proxy::{PROXY_IMAGE, dns};
+use crate::cli::proxy::{PROXY_IMAGE, dns, intermediate};
 use crate::table::Datum;
 use crate::table::gatherer::Publisher;
 
@@ -206,17 +210,12 @@ enum TlsSetup {
 }
 
 impl Probe {
-    pub(super) fn new(dns_port: u16, ca_root: Option<&Path>, sidecars: Vec<Sidecar>) -> Self {
-        let tls = match ca_root {
-            None => TlsSetup::Unavailable(
-                "proxy.caRoot is not set, so no TLS port can be served".to_string(),
-            ),
-            Some(dir) => match tls_config(dir) {
-                Ok(config) => TlsSetup::Ready(Arc::new(config)),
-                Err(e) => {
-                    TlsSetup::Unavailable(format!("can't read the CA at {}: {e}", dir.display()))
-                }
-            },
+    pub(super) fn new(dns_port: u16, ca_root: &Path, sidecars: Vec<Sidecar>) -> Self {
+        let tls = match tls_config(ca_root) {
+            Ok(config) => TlsSetup::Ready(Arc::new(config)),
+            Err(e) => {
+                TlsSetup::Unavailable(format!("can't read the CA at {}: {e}", ca_root.display()))
+            }
         };
         Probe {
             dns_port,
@@ -233,7 +232,7 @@ impl Probe {
 /// exactly that rather than passing because some system root happens to cover
 /// it.
 fn tls_config(ca_root: &Path) -> Result<ClientConfig> {
-    let path = ca_root.join("rootCA.pem");
+    let path = ca_root.join(ROOT_CA_PEM);
     let mut roots = RootCertStore::empty();
     for cert in
         CertificateDer::pem_file_iter(&path).wrap_err_with(|| format!("read {}", path.display()))?
@@ -258,7 +257,7 @@ fn tls_config(ca_root: &Path) -> Result<ClientConfig> {
 pub(super) async fn run_proxy(
     docker: &Docker,
     dns_port: u16,
-    ca_root: Option<&Path>,
+    ca_root: &Path,
     expected_hash: &str,
     wants_tls: bool,
     strays: &[String],
@@ -321,17 +320,27 @@ pub(super) async fn run_proxy(
     let dns = check_proxy_dns(dns_port).await;
     out.update(|c| c.dns = Datum::Value(dns));
 
-    let ca = check_ca(ca_root, wants_tls, details.as_ref());
+    let ca = check_ca(ca_root, details.as_ref());
+    let intermediate = check_intermediate(
+        details.as_ref().filter(|d| d.state.running).map(|d| {
+            d.config
+                .labels
+                .get(PROXY_CA_EXPIRY_LABEL)
+                .map(String::as_str)
+        }),
+        jiff::Timestamp::now(),
+    );
     let sidecars = check_strays(strays);
     out.update(|c| {
         c.ca = Datum::Value(ca);
+        c.intermediate = Datum::Value(intermediate);
         c.sidecars = Datum::Value(sidecars);
     });
 
     // Reading the platform's trust store hits the filesystem (and, on macOS,
     // the keychain), which is slow enough to stall the redraw loop.
-    let owned_root = ca_root.map(Path::to_path_buf);
-    let trust = tokio::task::spawn_blocking(move || check_trust(owned_root.as_deref(), wants_tls))
+    let owned_root = ca_root.to_path_buf();
+    let trust = tokio::task::spawn_blocking(move || check_trust(&owned_root, wants_tls))
         .await
         .unwrap_or_else(|_| Check::skip_because("the trust check didn't finish"));
     out.update(|c| c.trust = Datum::Value(trust));
@@ -342,15 +351,12 @@ pub(super) async fn run_proxy(
 /// system root can't make a wrong certificate pass. A handshake succeeding here
 /// says the proxy serves a correct certificate; it says nothing about whether
 /// your browser will accept it.
-fn check_trust(ca_root: Option<&Path>, wants_tls: bool) -> Check {
-    let Some(dir) = ca_root else {
-        return Check::skip_because("no caRoot is configured");
-    };
+fn check_trust(ca_root: &Path, wants_tls: bool) -> Check {
     if !wants_tls {
         return Check::skip_because("no tls port needs it");
     }
 
-    let path = dir.join("rootCA.pem");
+    let path = ca_root.join(ROOT_CA_PEM);
     let ours: Vec<CertificateDer<'static>> =
         match CertificateDer::pem_file_iter(&path).and_then(std::iter::Iterator::collect) {
             Ok(certs) => certs,
@@ -383,8 +389,9 @@ fn trust_verdict(
         return Check::skip_because(format!("couldn't read the system trust store: {problem}"));
     }
     Check::fail(
-        "the CA isn't in the system trust store; run `mkcert -install` (browsers keep \
-         their own stores, which it also installs into)",
+        "the CA isn't in the system trust store; run \
+         `CAROOT=$(devconcurrent show ca-root) mkcert -install` \
+         (browsers keep their own stores, which it also installs into)",
     )
 }
 
@@ -431,41 +438,62 @@ async fn check_proxy_dns(port: u16) -> Check {
     }
 }
 
-fn check_ca(
-    ca_root: Option<&Path>,
-    wants_tls: bool,
-    details: Option<&docker::ContainerDetails>,
-) -> Check {
-    let Some(dir) = ca_root else {
-        return if wants_tls {
-            Check::fail(
-                "proxy.caRoot is unset, but tls ports are configured; \
-                 they can't be served (see `mkcert -CAROOT`)",
-            )
-        } else {
-            Check::skip_because("no caRoot is configured, and no tls port needs one")
-        };
-    };
-
-    for file in ["rootCA.pem", "rootCA-key.pem"] {
-        let path = dir.join(file);
+fn check_ca(ca_root: &Path, details: Option<&docker::ContainerDetails>) -> Check {
+    for file in [ROOT_CA_PEM, ROOT_CA_KEY_PEM] {
+        let path = ca_root.join(file);
         if !path.exists() {
             return Check::fail(format!(
-                "{} is missing; is mkcert installed?",
+                "{} is missing; `dc proxy up` generates it",
                 path.display()
             ));
         }
     }
 
-    // Configured but not mounted: the proxy predates the setting.
+    // The proxy predates CA delivery.
     if let Some(details) = details
         && details.state.running
         && !details.config.parsed_env().contains_key(ENV_CA_DIR)
     {
-        return Check::fail("the proxy is running without the CA mounted; run `dc proxy up`");
+        return Check::fail("the proxy is running without a CA delivered; run `dc proxy up`");
     }
 
-    Check::ok().with_detail(dir.display().to_string())
+    Check::ok().with_detail(ca_root.display().to_string())
+}
+
+/// The intermediate CA the CLI handed the proxy at creation, judged by the
+/// `notAfter` label stamped on the container. `running_label` is `None` when
+/// the proxy isn't running, `Some(label)` otherwise.
+fn check_intermediate(running_label: Option<Option<&str>>, now: jiff::Timestamp) -> Check {
+    let Some(label) = running_label else {
+        // The `container` row already covers a proxy that isn't running.
+        return Check::skip();
+    };
+    match intermediate::expiry(label, now) {
+        intermediate::Expiry::Missing => {
+            Check::fail("the proxy carries no intermediate CA; run `dc proxy up`")
+        }
+        intermediate::Expiry::Expired(t) => Check::fail(format!(
+            "the intermediate CA expired {t}; https is down until `dc proxy up`"
+        )),
+        intermediate::Expiry::ExpiresSoon(t) => Check::fail(format!(
+            "the intermediate CA expires in {}; any dc command will renew it",
+            humanize(t.duration_since(now)),
+        )),
+        intermediate::Expiry::Valid(t) => {
+            Check::ok().with_detail(format!("expires in {}", humanize(t.duration_since(now))))
+        }
+    }
+}
+
+/// Render a duration the way a person tracks cert expiry: whole days once
+/// there are at least two of them, hours below that.
+fn humanize(d: SignedDuration) -> String {
+    let hours = d.as_hours();
+    if hours >= 48 {
+        format!("{}d", hours / 24)
+    } else {
+        format!("{hours}h")
+    }
 }
 
 fn check_strays(strays: &[String]) -> Check {
@@ -878,10 +906,16 @@ fn describe_handshake_error(error: &std::io::Error, hostname: &str) -> String {
     if text.contains("UnknownIssuer") {
         format!(
             "{hostname} presents a certificate the configured CA didn't issue; \
-             the proxy may be running with a different proxy.caRoot",
+             the proxy may be running with a different proxy.caRoot, or its \
+             intermediate CA is missing or expired (run `dc proxy up`)",
         )
     } else if text.contains("NotValidForName") {
         format!("the certificate served on this port isn't valid for {hostname}")
+    } else if text.contains("NameConstraintViolation") {
+        format!(
+            "{hostname} is outside the TLDs the intermediate CA may vouch for; \
+             add its TLD to proxy.tlds and run `dc proxy up`",
+        )
     } else {
         format!("the TLS handshake failed: {text}")
     }
@@ -1011,7 +1045,7 @@ mod tests {
     }
 
     fn probe(sidecars: Vec<Sidecar>) -> Probe {
-        Probe::new(43770, None, sidecars)
+        Probe::new(43770, Path::new("/nonexistent"), sidecars)
     }
 
     fn expected_hash(endpoint: &Endpoint) -> String {
@@ -1110,26 +1144,54 @@ mod tests {
     }
 
     #[test]
-    fn tls_ports_without_a_ca_are_a_failure_but_no_ca_without_them_is_fine() {
-        let check = check_ca(None, true, None);
-        assert!(check.failed());
-        assert!(check.detail.unwrap().contains("caRoot"));
-        assert_eq!(check_ca(None, false, None).outcome, Outcome::Skip);
-    }
-
-    #[test]
     fn a_ca_directory_missing_its_files_fails() {
         let dir = tempfile::tempdir().expect("temp dir");
-        let check = check_ca(Some(dir.path()), true, None);
+        let check = check_ca(dir.path(), None);
         assert!(check.failed());
         assert!(check.detail.unwrap().contains("rootCA.pem"));
 
         std::fs::write(dir.path().join("rootCA.pem"), "").expect("write cert");
-        let check = check_ca(Some(dir.path()), true, None);
+        let check = check_ca(dir.path(), None);
         assert!(check.failed(), "the key is still missing");
 
         std::fs::write(dir.path().join("rootCA-key.pem"), "").expect("write key");
-        assert_eq!(check_ca(Some(dir.path()), true, None).outcome, Outcome::Ok);
+        assert_eq!(check_ca(dir.path(), None).outcome, Outcome::Ok);
+    }
+
+    #[test]
+    fn the_intermediate_is_only_judged_when_the_proxy_is_running() {
+        // The container row owns a proxy that isn't running.
+        assert_eq!(
+            check_intermediate(None, jiff::Timestamp::now()).outcome,
+            Outcome::Skip
+        );
+    }
+
+    #[test]
+    fn a_running_proxy_without_an_intermediate_fails() {
+        let check = check_intermediate(Some(None), jiff::Timestamp::now());
+        assert!(check.failed());
+        assert!(check.detail.unwrap().contains("dc proxy up"));
+    }
+
+    #[test]
+    fn intermediate_expiry_is_reported() {
+        let now: jiff::Timestamp = "2026-08-16T00:00:00Z".parse().unwrap();
+
+        let valid = (now + SignedDuration::from_hours(29 * 24)).to_string();
+        let check = check_intermediate(Some(Some(&valid)), now);
+        assert_eq!(check.outcome, Outcome::Ok);
+        assert_eq!(check.detail.as_deref(), Some("expires in 29d"));
+
+        let soon = (now + SignedDuration::from_hours(30)).to_string();
+        let check = check_intermediate(Some(Some(&soon)), now);
+        assert!(check.failed());
+        assert!(check.detail.unwrap().contains("expires in 30h"));
+
+        let expired = (now - SignedDuration::from_hours(1)).to_string();
+        let check = check_intermediate(Some(Some(&expired)), now);
+        assert!(check.failed());
+        assert!(check.detail.unwrap().contains("expired"));
     }
 
     fn der(bytes: &[u8]) -> CertificateDer<'static> {
@@ -1149,7 +1211,12 @@ mod tests {
         let native = [der(b"some-public-root")];
         let check = trust_verdict(&ours, &native, None);
         assert!(check.failed());
-        assert!(check.detail.unwrap().contains("mkcert -install"));
+        assert!(
+            check
+                .detail
+                .unwrap()
+                .contains("CAROOT=$(devconcurrent show ca-root) mkcert -install")
+        );
     }
 
     /// A store we couldn't read is not evidence of anything.
@@ -1163,9 +1230,8 @@ mod tests {
 
     #[test]
     fn trust_is_not_checked_when_nothing_needs_it() {
-        assert_eq!(check_trust(None, true).outcome, Outcome::Skip);
         assert_eq!(
-            check_trust(Some(Path::new("/nonexistent")), false).outcome,
+            check_trust(Path::new("/nonexistent"), false).outcome,
             Outcome::Skip,
         );
     }

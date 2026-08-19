@@ -20,7 +20,10 @@
       "description": "Global proxy settings.",
       "default": {
         "port": 43770,
-        "caRoot": null
+        "caRoot": null,
+        "tlds": [
+          "test"
+        ]
       },
       "allOf": [
         {
@@ -51,7 +54,7 @@
           "type": "string"
         },
         "worktreeFolder": {
-          "description": "The directory where devconcurrent will place worktrees. Defaults to the platform data\ndirectory. This is also settable in the devcontainer, but it's available here for projects\nthat don't use devcontainers.",
+          "description": "The directory where devconcurrent will place worktrees. Defaults to\n`workspaces/<project>` under the platform data directory. This is also settable in the\ndevcontainer, but it's available here for projects that don't use devcontainers.",
           "type": [
             "string",
             "null"
@@ -845,12 +848,22 @@
           "default": 43770
         },
         "caRoot": {
-          "description": "Path to your CA root directory on the host. Find it with `mkcert -CAROOT`.",
+          "description": "Directory holding the root CA used to terminate TLS.\n\nDefaults to `devconcurrent/ca` in your platform's data directory.",
           "type": [
             "string",
             "null"
           ],
           "default": null
+        },
+        "tlds": {
+          "description": "TLDs that the proxy may mint certificates for and serve TLS on.\n\nChanging this list regenerates the root CA, which will need to be trusted again.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "test"
+          ]
         }
       }
     },

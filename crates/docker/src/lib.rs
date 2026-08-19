@@ -70,3 +70,7 @@ pub const PROXY_SERVICE_LABEL: &str = "com.paholg.devconcurrent.proxy.service";
 /// global config (see `ProxyState::config_hash`); on a sidecar it's that
 /// sidecar's `SidecarPlan`.
 pub const PROXY_CONFIG_HASH_LABEL: &str = "com.paholg.devconcurrent.proxy.config-hash";
+/// Present on the primary proxy when it carries an intermediate CA. Value is
+/// the RFC 3339 `notAfter` of that CA, so the CLI can tell when it is due for
+/// renewal without reaching into the container.
+pub const PROXY_CA_EXPIRY_LABEL: &str = "com.paholg.devconcurrent.proxy.ca-not-after";

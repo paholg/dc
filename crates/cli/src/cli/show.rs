@@ -30,6 +30,10 @@ enum ShowCommands {
     Hostname(Hostname),
     /// Show this workspace's configured shell variables
     Env(Env),
+    /// Print the CA root directory, generating the CA if it isn't there yet
+    ///
+    /// Trust the CA with `CAROOT=$(devconcurrent show ca-root) mkcert -install`.
+    CaRoot(CaRoot),
 }
 
 #[derive(Debug, Args)]
@@ -52,6 +56,9 @@ struct Hostname {
 }
 
 #[derive(Debug, Args)]
+struct CaRoot;
+
+#[derive(Debug, Args)]
 struct Env {
     /// Set the variables in the calling shell, in this shell's syntax, instead
     /// of printing a table.
@@ -67,9 +74,10 @@ impl Show {
     pub(crate) async fn run(self, project: Option<String>) -> eyre::Result<()> {
         // `env` builds its own state: with `--export` it runs from a shell
         // prompt, where standing outside a project is ordinary rather than an
-        // error.
+        // error. `ca-root` is global, so it needs no state at all.
         let command = match self.command {
             ShowCommands::Env(env) => return env.run(project).await,
+            ShowCommands::CaRoot(ca_root) => return ca_root.run(),
             command => command,
         };
 
@@ -80,8 +88,20 @@ impl Show {
             ShowCommands::Workspace(ws) => ws.run(state).await,
             ShowCommands::Ip(ip) => ip.run(state).await,
             ShowCommands::Hostname(hostname) => hostname.run(state).await,
-            ShowCommands::Env(_) => unreachable!("returned above"),
+            ShowCommands::Env(_) | ShowCommands::CaRoot(_) => unreachable!("returned above"),
         }
+    }
+}
+
+impl CaRoot {
+    fn run(self) -> eyre::Result<()> {
+        let config = Config::load()?;
+        let dir = config.proxy.ca_root_dir()?;
+        // Never hand out a hollow directory: `mkcert -install` on an empty
+        // CAROOT would generate mkcert's own (unusable) root there.
+        crate::cli::proxy::intermediate::ensure_root(&dir, &config.proxy.tlds)?;
+        println!("{}", dir.display());
+        Ok(())
     }
 }
 

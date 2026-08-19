@@ -101,9 +101,26 @@ impl Default for ShellGlobal {
 pub(crate) struct ProxyGlobal {
     /// The DNS port the proxy listens on.
     pub(crate) port: u16,
-    /// Path to your CA root directory on the host. Find it with `mkcert -CAROOT`.
+    /// Directory holding the root CA used to terminate TLS.
+    ///
+    /// Defaults to `devconcurrent/ca` in your platform's data directory.
     #[serde(default, deserialize_with = "deserialize_shell_path_opt")]
     pub(crate) ca_root: Option<PathBuf>,
+
+    /// TLDs that the proxy may mint certificates for and serve TLS on.
+    ///
+    /// Changing this list regenerates the root CA, which will need to be trusted again.
+    pub(crate) tlds: Vec<String>,
+}
+
+impl ProxyGlobal {
+    /// The configured `caRoot`, or its default under the data dir.
+    pub(crate) fn ca_root_dir(&self) -> eyre::Result<PathBuf> {
+        match &self.ca_root {
+            Some(dir) => Ok(dir.clone()),
+            None => Ok(data_dir()?.join("ca")),
+        }
+    }
 }
 
 impl Default for ProxyGlobal {
@@ -111,6 +128,7 @@ impl Default for ProxyGlobal {
         Self {
             port: DEFAULT_PROXY_PORT,
             ca_root: None,
+            tlds: vec!["test".to_string()],
         }
     }
 }
@@ -122,9 +140,9 @@ pub(crate) struct Project {
     /// The project location on your host.
     #[serde(deserialize_with = "deserialize_shell_path")]
     pub(crate) path: PathBuf,
-    /// The directory where devconcurrent will place worktrees. Defaults to the platform data
-    /// directory. This is also settable in the devcontainer, but it's available here for projects
-    /// that don't use devcontainers.
+    /// The directory where devconcurrent will place worktrees. Defaults to
+    /// `workspaces/<project>` under the platform data directory. This is also settable in the
+    /// devcontainer, but it's available here for projects that don't use devcontainers.
     #[serde(default, deserialize_with = "deserialize_shell_path_opt")]
     pub(crate) worktree_folder: Option<PathBuf>,
     /// Any of the options from `devcontainer.json` (<https://containers.dev/implementors/json_reference/>),
@@ -195,6 +213,15 @@ impl Config {
 
         Ok(name)
     }
+}
+
+/// The platform data directory devconcurrent keeps its state in: generated
+/// worktrees under `workspaces/`, the root CA under `ca`.
+pub(crate) fn data_dir() -> eyre::Result<PathBuf> {
+    Ok(directories::ProjectDirs::from("", "", "devconcurrent")
+        .ok_or_else(|| eyre!("could not determine data directory"))?
+        .data_dir()
+        .to_path_buf())
 }
 
 /// The directory we read `config.toml` from.

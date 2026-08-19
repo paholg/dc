@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+
 use clap::Args;
 use clap_complete::ArgValueCompleter;
 use color_eyre::owo_colors::OwoColorize;
@@ -131,6 +133,24 @@ impl Up {
         // events.
         if devcontainer.proxy_enabled() {
             let project = workspace.state.project_name.clone();
+
+            // Catch a hostname template that renders outside proxy.tlds now,
+            // rather than as a DNS miss or certificate error in the browser.
+            let opts = &devcontainer.devconcurrent().proxy;
+            let mut services: BTreeSet<&str> = opts.services.keys().map(String::as_str).collect();
+            services.insert(devcontainer.config.service.as_str());
+            if let Some(run) = &devcontainer.config.run_services {
+                services.extend(run.iter().map(String::as_str));
+            }
+            proxy::check_hostname_tlds(
+                opts,
+                project.as_str(),
+                &workspace.name,
+                workspace.is_root,
+                services,
+                &config.proxy.tlds,
+            )?;
+
             let proxy = proxy::ProxyState::from_workspace(config, project, Some(workspace)).await?;
             proxy::ensure_up(proxy).await?;
         }

@@ -39,14 +39,21 @@
 
         # Member crates set `version.workspace = true`, which crane can't
         # resolve from a member Cargo.toml alone.
-        workspaceVersion =
-          (builtins.fromTOML (builtins.readFile ./Cargo.toml)).workspace.package.version;
-        crateName = craneLib.crateNameFromCargoToml {
-          cargoToml = ./crates/cli/Cargo.toml;
-        } // { version = workspaceVersion; };
-        serviceCrateName = craneLib.crateNameFromCargoToml {
-          cargoToml = ./crates/proxy/Cargo.toml;
-        } // { version = workspaceVersion; };
+        workspaceVersion = (builtins.fromTOML (builtins.readFile ./Cargo.toml)).workspace.package.version;
+        crateName =
+          craneLib.crateNameFromCargoToml {
+            cargoToml = ./crates/cli/Cargo.toml;
+          }
+          // {
+            version = workspaceVersion;
+          };
+        serviceCrateName =
+          craneLib.crateNameFromCargoToml {
+            cargoToml = ./crates/proxy/Cargo.toml;
+          }
+          // {
+            version = workspaceVersion;
+          };
 
         commonArgs = {
           inherit (crateName) pname version;
@@ -99,18 +106,21 @@
         };
 
         # OCI image for the service.
-        #
-        # `sidecarDir` is an empty `/etc/sidecar/` that exists at create time so
-        # the proxy can `PUT archive` plan.json (+ cert/key) into it before
-        # starting the sidecar — Docker's archive endpoint 404s if the target
-        # directory doesn't exist in the image.
-        sidecarDir = pkgs.runCommand "sidecar-dir" { } "mkdir -p $out/etc/sidecar";
         dockerImage = nix2container.packages.${system}.nix2container.buildImage {
           name = "devconcurrent-proxy";
           tag = serviceCrateName.version;
           copyToRoot = [
             pkgs.cacert
-            sidecarDir
+            # We need to PUT files into containers before starting them; docker
+            # will 404 unless the directories already exist.
+            (pkgs.runCommand "mkdirs" { } # bash
+              ''
+                # Stores the sidecar's plan.json and certificate/key
+                mkdir -p $out/etc/sidecar
+                # Stores the intermediate CA
+                mkdir -p $out/etc/proxy-ca
+              ''
+            )
           ];
           maxLayers = 100;
           config = {

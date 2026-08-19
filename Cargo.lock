@@ -962,6 +962,7 @@ dependencies = [
  "num-bigint 0.5.1",
  "owo-colors",
  "rand 0.10.2",
+ "rcgen",
  "rustix",
  "rustls",
  "rustls-native-certs",
@@ -978,6 +979,7 @@ dependencies = [
  "sigpipe",
  "tabular",
  "tempfile",
+ "time",
  "tokio",
  "tokio-rustls",
  "toml 1.1.4+spec-1.1.0",
@@ -986,6 +988,7 @@ dependencies = [
  "tracing-subscriber",
  "vec1",
  "winnow 1.0.4",
+ "x509-parser",
 ]
 
 [[package]]
@@ -1011,12 +1014,15 @@ dependencies = [
  "rustls",
  "serde_json",
  "shared",
+ "tempfile",
+ "time",
  "tokio",
  "tokio-rustls",
  "tower",
  "tower-http 0.7.0",
  "tracing",
  "tracing-subscriber",
+ "x509-parser",
 ]
 
 [[package]]

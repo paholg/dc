@@ -158,9 +158,8 @@ impl<'a> State<'a> {
             })
         }) {
             Some(dir) => dir,
-            None => directories::ProjectDirs::from("", "", "devconcurrent")
-                .ok_or_eyre("could not determine data directory")?
-                .data_dir()
+            None => crate::config::data_dir()?
+                .join("workspaces")
                 .join(project_name),
         };
 

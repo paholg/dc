@@ -45,7 +45,7 @@ async fn main() -> Result<()> {
     let ca = if let Ok(dir) = std::env::var(ENV_CA_DIR) {
         match CaHolder::load(Path::new(&dir)) {
             Ok(ca) => {
-                info!(dir, "loaded mkcert CA");
+                info!(dir, "loaded intermediate CA");
                 Some(ca)
             }
             Err(e) => {

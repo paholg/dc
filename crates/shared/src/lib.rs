@@ -22,9 +22,20 @@ pub const PROXY_CONFIG_DIR: &str = "/etc/proxy";
 /// Single file inside [`PROXY_CONFIG_DIR`] containing the merged
 /// `HashMap<project_name, ProxyOptions>` for all proxy-enabled projects.
 pub const PROXY_CONFIG_FILE: &str = "projects.json";
-/// Directory inside the proxy container where the mkcert CAROOT is
-/// bind-mounted read-only when TLS is enabled.
+/// Directory inside the proxy container where the CLI uploads the intermediate CA before starting
+/// it. It lives in the container's writable layer, never in a volume: the key dies with the
+/// container.
 pub const PROXY_CA_DIR: &str = "/etc/proxy-ca";
+/// Intermediate CA cert + key file names inside [`PROXY_CA_DIR`].
+pub const PROXY_CA_CERT_FILE: &str = "intermediateCA.pem";
+pub const PROXY_CA_KEY_FILE: &str = "intermediateCA-key.pem";
+
+/// Root CA file names on the host, inside the configured `proxy.caRoot`. The
+/// names match mkcert's so `CAROOT=<caRoot> mkcert -install` can install
+/// trust. Read by the CLI to sign the intermediate; never mounted into any
+/// container.
+pub const ROOT_CA_PEM: &str = "rootCA.pem";
+pub const ROOT_CA_KEY_PEM: &str = "rootCA-key.pem";
 
 /// Directory inside each sidecar container where the proxy writes the per-
 /// service plan and (if TLS is enabled) cert + key.
@@ -35,8 +46,8 @@ pub const SIDECAR_KEY_FILE: &str = "key.pem";
 
 // Environment variables read by the proxy on startup.
 pub const ENV_DNS_PORT: &str = "DEVCONCURRENT_PROXY_DNS_PORT";
-/// Set by the CLI when a CAROOT bind-mount is present. The proxy loads
-/// `rootCA.pem` + `rootCA-key.pem` from this directory.
+/// Set by the CLI when an intermediate CA was uploaded. The proxy loads
+/// [`PROXY_CA_CERT_FILE`] + [`PROXY_CA_KEY_FILE`] from this directory.
 pub const ENV_CA_DIR: &str = "DEVCONCURRENT_PROXY_CA_DIR";
 
 /// Default Handlebars template for proxied hostnames.

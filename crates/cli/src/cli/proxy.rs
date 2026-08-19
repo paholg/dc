@@ -4,17 +4,20 @@ use std::time::Duration;
 use clap::{Args, Subcommand};
 use clap_complete::engine::ArgValueCompleter;
 use color_eyre::owo_colors::OwoColorize;
-use docker::{Docker, PROXY_CONFIG_HASH_LABEL, PROXY_GROUP_LABEL, PROXY_LABEL};
+use docker::{
+    Docker, PROXY_CA_EXPIRY_LABEL, PROXY_CONFIG_HASH_LABEL, PROXY_GROUP_LABEL, PROXY_LABEL,
+};
 use eyre::{Result, WrapErr};
 use shared::{
-    ENV_CA_DIR, ENV_DNS_PORT, PROXY_CA_DIR, PROXY_CONFIG_DIR, PROXY_CONFIG_VOLUME,
-    PROXY_CONTAINER_NAME,
+    ENV_CA_DIR, ENV_DNS_PORT, PROXY_CA_CERT_FILE, PROXY_CA_DIR, PROXY_CA_KEY_FILE,
+    PROXY_CONFIG_DIR, PROXY_CONFIG_VOLUME, PROXY_CONTAINER_NAME,
 };
 
 use crate::complete::complete_workspace;
 use crate::run::{Runnable, Runner};
 
 mod dns;
+pub(crate) mod intermediate;
 mod proxy_state;
 mod status;
 pub(crate) use proxy_state::ProxyState;
@@ -100,6 +103,12 @@ impl Runnable for ProxyRunner {
 
 /// Bring up the proxy and sidecars, recreating them if they already exist.
 async fn proxy_up(proxy: &ProxyState) -> Result<()> {
+    // Mint before touching anything, so a broken caRoot leaves the old proxy
+    // running. The root key is only ever read here, on the host; the container
+    // receives an intermediate that can't sign outside the configured TLDs.
+    let intermediate = intermediate::mint(&proxy.ca_root, &proxy.config.tlds)
+        .wrap_err("mint the intermediate CA (check proxy.caRoot)")?;
+
     proxy
         .docker
         .ensure_image(&PROXY_IMAGE)
@@ -108,8 +117,9 @@ async fn proxy_up(proxy: &ProxyState) -> Result<()> {
 
     remove_proxy_group(&proxy.docker).await?;
 
-    let id = create_proxy_stopped(proxy).await?;
+    let id = create_proxy_stopped(proxy, &intermediate).await?;
     proxy.push_configs().await?;
+    push_intermediate(&proxy.docker, &intermediate).await?;
     proxy
         .docker
         .start_container(&id)
@@ -140,6 +150,43 @@ async fn remove_proxy_group(docker: &Docker) -> Result<()> {
     Ok(())
 }
 
+/// Check that every hostname this workspace's services render to falls under
+/// one of `proxy.tlds`. Outside them, DNS is never routed to the proxy and
+/// the name-constrained CA cannot vouch for the name, so the misconfiguration
+/// would otherwise only surface as a browser error much later. Services whose
+/// template fails to render are skipped; the proxy reports those itself.
+pub(crate) fn check_hostname_tlds<'a>(
+    opts: &shared::ProxyOptions,
+    project: &str,
+    workspace: &str,
+    root: bool,
+    services: impl IntoIterator<Item = &'a str>,
+    tlds: &[String],
+) -> Result<()> {
+    for service in services {
+        let Some(hostname) = opts.render_hostname(project, workspace, service, root) else {
+            continue;
+        };
+        // dNSName matching is case-insensitive; a TLD covers itself and every
+        // subdomain, on label boundaries.
+        let lower = hostname.to_ascii_lowercase();
+        let covered = tlds.iter().any(|tld| {
+            let tld = tld.to_ascii_lowercase();
+            lower == tld || lower.ends_with(&format!(".{tld}"))
+        });
+        if !covered {
+            eyre::bail!(
+                "\
+The hostname {hostname} for service {service} is not included in `proxy.tlds`.
+Devconcurrent's DNS will not resolve it, and its CA cannot mint a certificate for it.
+
+Fix the hostname template or add its TLD to proxy.tlds in config.toml"
+            );
+        }
+    }
+    Ok(())
+}
+
 /// Ensure the proxy is running.
 ///
 /// If it's already running but with stale config, it's recreated.
@@ -154,7 +201,21 @@ pub(crate) async fn ensure_up(proxy: ProxyState) -> Result<()> {
     let state = match proxy.docker.inspect_container(PROXY_CONTAINER_NAME).await {
         Ok(d) => {
             if d.state.running {
-                if d.config.labels.get(PROXY_CONFIG_HASH_LABEL) == Some(&hash) {
+                let hash_ok = d.config.labels.get(PROXY_CONFIG_HASH_LABEL) == Some(&hash);
+                // A missing/unparseable label also counts as stale: it means
+                // the proxy was created by an older CLI, without an
+                // intermediate.
+                let ca_fresh = matches!(
+                    intermediate::expiry(
+                        d.config
+                            .labels
+                            .get(PROXY_CA_EXPIRY_LABEL)
+                            .map(String::as_str),
+                        jiff::Timestamp::now(),
+                    ),
+                    intermediate::Expiry::Valid(_)
+                );
+                if hash_ok && ca_fresh {
                     State::Up
                 } else {
                     State::Old
@@ -219,7 +280,10 @@ async fn wait_for_ready(docker: &Docker, id: &str, port: u16) -> Result<()> {
     }
 }
 
-async fn create_proxy_stopped(proxy: &ProxyState) -> Result<String> {
+async fn create_proxy_stopped(
+    proxy: &ProxyState,
+    intermediate: &intermediate::Intermediate,
+) -> Result<String> {
     // Not necessarily the socket the CLI itself talks to: on Docker Desktop
     // only the default path is shared into a container.
     let socket_path = proxy.docker.socket_mount_source();
@@ -227,7 +291,7 @@ async fn create_proxy_stopped(proxy: &ProxyState) -> Result<String> {
     // The DNS port is published rather than the container sharing the host's
     // network namespace: on macOS and Windows the "host" of a host-networked
     // container is Docker's VM, not the machine the user's resolver runs on.
-    let mut builder = proxy
+    let builder = proxy
         .docker
         .create_container(PROXY_CONTAINER_NAME)
         .image(&PROXY_IMAGE)
@@ -238,13 +302,86 @@ async fn create_proxy_stopped(proxy: &ProxyState) -> Result<String> {
         .with_label(PROXY_CONFIG_HASH_LABEL, proxy.config_hash())
         .with_bind(PROXY_CONFIG_VOLUME, PROXY_CONFIG_DIR)
         .with_bind(socket_path.display(), "/var/run/docker.sock")
-        .with_env(ENV_DNS_PORT, proxy.config.port);
-
-    if let Some(ca_root) = &proxy.config.ca_root {
-        builder = builder
-            .with_ro_bind(ca_root.display(), PROXY_CA_DIR)
-            .with_env(ENV_CA_DIR, PROXY_CA_DIR);
-    }
+        .with_env(ENV_DNS_PORT, proxy.config.port)
+        .with_env(ENV_CA_DIR, PROXY_CA_DIR)
+        .with_label(PROXY_CA_EXPIRY_LABEL, intermediate.not_after.to_string());
 
     builder.call().await.wrap_err("create proxy container")
+}
+
+/// Upload the intermediate CA into the stopped proxy container's writable
+/// layer, where it dies with the container.
+async fn push_intermediate(
+    docker: &Docker,
+    intermediate: &intermediate::Intermediate,
+) -> Result<()> {
+    let tar = docker::build_archive(&[
+        (PROXY_CA_CERT_FILE, intermediate.cert_pem.as_bytes()),
+        (PROXY_CA_KEY_FILE, intermediate.key_pem.as_bytes()),
+    ]);
+    docker
+        .upload_archive(PROXY_CONTAINER_NAME, PROXY_CA_DIR, tar)
+        .await
+        .wrap_err("upload intermediate CA")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn opts(value: serde_json::Value) -> shared::ProxyOptions {
+        serde_json::from_value(value).expect("valid proxy options")
+    }
+
+    fn check(options: &shared::ProxyOptions, tlds: &[&str]) -> Result<()> {
+        let tlds: Vec<String> = tlds.iter().map(ToString::to_string).collect();
+        check_hostname_tlds(options, "proj", "feature", false, ["app"], &tlds)
+    }
+
+    #[test]
+    fn a_hostname_outside_the_tlds_is_an_immediate_error() {
+        // The default template ends in `.test`, which is not in proxy.tlds.
+        let options = opts(serde_json::json!({"enable": true}));
+        let err = check(&options, &["dev"]).unwrap_err();
+        let text = err.to_string();
+        assert!(text.contains("feature.app.test"), "{text}");
+        assert!(text.contains("proxy.tlds"), "{text}");
+    }
+
+    #[test]
+    fn a_hostname_under_a_configured_tld_passes() {
+        let options = opts(serde_json::json!({
+            "enable": true,
+            "hostname": "{{workspace}}.{{service}}.internal.dev",
+        }));
+        check(&options, &["internal.dev"]).unwrap();
+        // Multi-entry tlds: any match suffices.
+        check(&options, &["test", "internal.dev"]).unwrap();
+    }
+
+    #[test]
+    fn tld_matching_is_case_insensitive_and_on_label_boundaries() {
+        let options = opts(serde_json::json!({
+            "enable": true,
+            "hostname": "{{workspace}}.{{service}}.TEST",
+        }));
+        check(&options, &["test"]).unwrap();
+
+        // `mytest` must not match the `test` TLD by substring.
+        let options = opts(serde_json::json!({
+            "enable": true,
+            "hostname": "{{workspace}}.{{service}}.mytest",
+        }));
+        assert!(check(&options, &["test"]).is_err());
+    }
+
+    #[test]
+    fn a_per_service_hostname_is_checked_too() {
+        let options = opts(serde_json::json!({
+            "enable": true,
+            "services": {"app": {"hostname": "app.localhost"}},
+        }));
+        let err = check(&options, &["test"]).unwrap_err();
+        assert!(err.to_string().contains("app.localhost"), "{err}");
+    }
 }

@@ -66,11 +66,7 @@ pub(super) async fn run(proxy: &ProxyState, args: &StatusArgs) -> Result<()> {
     let (endpoints, sidecars) = scope(found, proxy, args.all);
 
     let strays = stray_sidecars(&sidecars, &endpoints);
-    let probe = Arc::new(Probe::new(
-        proxy.config.port,
-        proxy.config.ca_root.as_deref(),
-        sidecars,
-    ));
+    let probe = Arc::new(Probe::new(proxy.config.port, &proxy.ca_root, sidecars));
 
     let proxy_checks = spawn_proxy_checks(proxy, strays, args.live);
     let rows: Vec<Row> = endpoints
@@ -234,6 +230,7 @@ struct ProxyChecks {
     config: Datum<Check>,
     dns: Datum<Check>,
     ca: Datum<Check>,
+    intermediate: Datum<Check>,
     trust: Datum<Check>,
     sidecars: Datum<Check>,
 }
@@ -242,13 +239,14 @@ struct ProxyChecks {
 type PickProxy = fn(&ProxyChecks) -> &Datum<Check>;
 
 /// The rows of the first table, in display order.
-const PROXY_ROWS: [(&str, PickProxy); 8] = [
+const PROXY_ROWS: [(&str, PickProxy); 9] = [
     ("docker", |c| &c.docker),
     ("container", |c| &c.container),
     ("image", |c| &c.image),
     ("config", |c| &c.config),
     ("dns", |c| &c.dns),
     ("ca", |c| &c.ca),
+    ("intermediate", |c| &c.intermediate),
     ("trust", |c| &c.trust),
     ("sidecars", |c| &c.sidecars),
 ];
@@ -282,7 +280,7 @@ fn spawn_proxy_checks(
 ) -> Gatherer<ProxyChecks> {
     let docker = proxy.docker.clone();
     let port = proxy.config.port;
-    let ca_root = proxy.config.ca_root.clone();
+    let ca_root = proxy.ca_root.clone();
     let expected_hash = proxy.config_hash();
     // Every proxied service is served over https, so any one of them is reason
     // enough to check the CA.
@@ -297,7 +295,7 @@ fn spawn_proxy_checks(
             checks::run_proxy(
                 &docker,
                 port,
-                ca_root.as_deref(),
+                &ca_root,
                 &expected_hash,
                 wants_tls,
                 &strays,

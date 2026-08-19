@@ -17,6 +17,7 @@ This document contains the help content for the `devconcurrent` command-line pro
 * [`devconcurrent show ip`↴](#devconcurrent-show-ip)
 * [`devconcurrent show hostname`↴](#devconcurrent-show-hostname)
 * [`devconcurrent show env`↴](#devconcurrent-show-env)
+* [`devconcurrent show ca-root`↴](#devconcurrent-show-ca-root)
 * [`devconcurrent status`↴](#devconcurrent-status)
 * [`devconcurrent go`↴](#devconcurrent-go)
 * [`devconcurrent proxy`↴](#devconcurrent-proxy)
@@ -159,6 +160,7 @@ Show some value
 * `ip` — Show container IP addresses for this workspace
 * `hostname` — Show proxied hostnames for this workspace
 * `env` — Show this workspace's configured shell variables
+* `ca-root` — Print the CA root directory, generating the CA if it isn't there yet
 
 
 
@@ -216,6 +218,16 @@ Show this workspace's configured shell variables
 
   Possible values: `bash`, `elvish`, `fish`, `powershell`, `zsh`
 
+
+
+
+## `devconcurrent show ca-root`
+
+Print the CA root directory, generating the CA if it isn't there yet
+
+Trust the CA with `CAROOT=$(devconcurrent show ca-root) mkcert -install`.
+
+**Usage:** `devconcurrent show ca-root`
 
 
 

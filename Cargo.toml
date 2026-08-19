@@ -12,11 +12,13 @@ repository = "https://github.com/paholg/devconcurrent"
 [workspace.dependencies]
 bon = "3.9.3"
 indexmap = { version = "2.14", features = ["serde"] }
+rcgen = { version = "0.14.9", features = ["pem", "x509-parser"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 tempfile = "3"
 tokio = "1"
 tracing = "0.1"
+x509-parser = "0.18"
 
 [workspace.lints.clippy]
 # cast_precision_loss = "allow"

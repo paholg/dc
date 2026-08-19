@@ -51,6 +51,15 @@ jobs:
           TAG: ${{ fromJson(inputs.plan).announcement_tag }}
         run: echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
 
+      - name: Fail if tag already exists
+        env:
+          TAG: ${{ env.IMAGE }}:${{ steps.version.outputs.version }}-${{ matrix.arch }}
+        run: |
+          if docker buildx imagetools inspect "$TAG" >/dev/null 2>&1; then
+            echo "::error::$TAG already exists; refusing to overwrite"
+            exit 1
+          fi
+
       - name: Build & push per-arch image
         run: |
           # GitHub's runner image hardcodes a v1 /etc/containers/registries.conf,
@@ -84,14 +93,21 @@ jobs:
           images: ${{ env.IMAGE }}
           tags: |
             type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=sha
 
       - name: Create manifests
         env:
           TAGS: ${{ steps.meta.outputs.tags }}
           VERSION: ${{ needs.image.outputs.version }}
         run: |
+          # Tags are immutable. Check all tags before creating any, so a
+          # partial push can't slip past the guard.
+          while IFS= read -r tag; do
+            [ -z "$tag" ] && continue
+            if docker buildx imagetools inspect "$tag" >/dev/null 2>&1; then
+              echo "::error::$tag already exists; refusing to overwrite"
+              exit 1
+            fi
+          done <<< "$TAGS"
           while IFS= read -r tag; do
             [ -z "$tag" ] && continue
             docker buildx imagetools create \

@@ -183,13 +183,13 @@ impl Docker {
     /// Returns [`Error::NotFound`] if the container doesn't exist (so callers
     /// can `match` on it).
     pub async fn inspect_container(&self, id: &str) -> Result<ContainerDetails> {
-        let url = self.url(&format!("containers/{id}/json"));
+        let url = self.url(["containers", id, "json"])?;
         self.http().get(url).try_send().await
     }
 
     /// `POST /containers/{id}/start` — start a stopped container.
     pub async fn start_container(&self, id: &str) -> Result<()> {
-        let url = self.url(&format!("containers/{id}/start"));
+        let url = self.url(["containers", id, "start"])?;
         self.http().post(url).try_send_empty().await
     }
 }
@@ -210,7 +210,7 @@ impl Docker {
         #[builder(field)] filters: Vec<Filter>,
         #[builder(default)] all: bool,
     ) -> Result<Vec<ContainerSummary>> {
-        let mut url = self.url("containers/json");
+        let mut url = self.url(["containers", "json"])?;
         {
             let mut pairs = url.query_pairs_mut();
             if all {
@@ -241,7 +241,7 @@ impl Docker {
         #[builder(default)]
         link: bool,
     ) -> Result<()> {
-        let mut url = self.url(&format!("containers/{id}"));
+        let mut url = self.url(["containers", id])?;
         {
             let mut pairs = url.query_pairs_mut();
             if force {
@@ -364,7 +364,7 @@ impl Docker {
         #[builder(default)] cmd: Vec<String>,
         network_mode: Option<&str>,
     ) -> Result<String> {
-        let mut url = self.url("containers/create");
+        let mut url = self.url(["containers", "create"])?;
         url.query_pairs_mut().append_pair("name", name);
 
         labels.insert(MANAGED_LABEL.to_string(), "true".to_string());

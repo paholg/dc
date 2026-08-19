@@ -43,7 +43,7 @@ impl Docker {
     /// `GET /containers/{id}/stats?stream=false&one-shot=true` — a single
     /// snapshot of cgroup-level stats.
     pub async fn stats(&self, id: &str) -> Result<ContainerStats> {
-        let mut url = self.url(&format!("containers/{id}/stats"));
+        let mut url = self.url(["containers", id, "stats"])?;
         {
             let mut pairs = url.query_pairs_mut();
             pairs.append_pair("stream", "false");

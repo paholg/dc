@@ -6,7 +6,7 @@ impl Docker {
     /// `PUT /containers/{id}/archive?path=<dest>` — extract a tar archive into
     /// `dest` inside the container.
     pub async fn upload_archive(&self, id: &str, dest_dir: &str, tar: Vec<u8>) -> Result<()> {
-        let mut url = self.url(&format!("containers/{id}/archive"));
+        let mut url = self.url(["containers", id, "archive"])?;
         url.query_pairs_mut().append_pair("path", dest_dir);
         self.http()
             .put(url)

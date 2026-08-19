@@ -132,7 +132,7 @@ impl Docker {
     ///
     /// Returns [`crate::Error::NotFound`] if the image isn't locally available.
     pub async fn inspect_image(&self, name: &str) -> Result<ImageDetails> {
-        let url = self.url(&format!("images/{name}/json"));
+        let url = self.url(["images", name, "json"])?;
         self.http().get(url).try_send().await
     }
 
@@ -142,7 +142,7 @@ impl Docker {
     /// outcome; per-layer progress is dropped. If any line in the stream
     /// carries an error event, surface it as [`crate::Error::Api`].
     pub async fn pull_image(&self, name: &str) -> Result<()> {
-        let mut url = self.url("images/create");
+        let mut url = self.url(["images", "create"])?;
         url.query_pairs_mut().append_pair("fromImage", name);
 
         let events: Vec<PullEvent> = self.http().post(url).try_send_ndjson().await?;
@@ -194,7 +194,7 @@ impl Docker {
         /// Called with each line of build output, as it arrives.
         on_output: Option<&mut (dyn FnMut(&str) + Send)>,
     ) -> Result<()> {
-        let mut url = self.url("build");
+        let mut url = self.url(["build"])?;
         {
             let mut pairs = url.query_pairs_mut();
             pairs.append_pair("t", tag);
@@ -306,7 +306,7 @@ impl Docker {
         #[builder(default)]
         all: bool,
     ) -> Result<Vec<ImageSummary>> {
-        let mut url = self.url("images/json");
+        let mut url = self.url(["images", "json"])?;
 
         {
             let mut pairs = url.query_pairs_mut();
@@ -342,7 +342,7 @@ impl Docker {
         #[builder(default)]
         noprune: bool,
     ) -> Result<()> {
-        let mut url = self.url(&format!("images/{name}"));
+        let mut url = self.url(["images", name])?;
         {
             let mut pairs = url.query_pairs_mut();
             if force {

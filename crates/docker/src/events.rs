@@ -123,7 +123,7 @@ impl EventsBuilder<'_> {
     /// can't parse yields [`Error::Json`] and the stream continues; a
     /// transport error yields that error and then ends.
     pub async fn call(self) -> Result<impl Stream<Item = Result<EventMessage>> + 'static> {
-        let mut url = self.docker.url("events");
+        let mut url = self.docker.url(["events"])?;
         if !self.filters.is_empty() {
             let json = serde_json::to_string(&self.filters).expect("string-keyed map serializes");
             url.query_pairs_mut().append_pair("filters", &json);

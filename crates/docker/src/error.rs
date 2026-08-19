@@ -34,6 +34,9 @@ pub enum Error {
     #[snafu(display("not found"))]
     NotFound,
 
+    #[snafu(display("{segment:?} cannot be used as a URL path segment"))]
+    InvalidPathSegment { segment: String },
+
     #[snafu(display("failed to decode JSON response: {body}"))]
     Json {
         source: serde_json::Error,

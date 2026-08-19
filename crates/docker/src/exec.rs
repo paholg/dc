@@ -40,7 +40,7 @@ impl Docker {
     ///
     /// Returns [`crate::Error::NotFound`] if the exec doesn't exist.
     pub async fn inspect_exec(&self, id: &str) -> Result<ExecDetails> {
-        let url = self.url(&format!("exec/{id}/json"));
+        let url = self.url(["exec", id, "json"])?;
         self.http().get(url).try_send().await
     }
 }

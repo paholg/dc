@@ -34,7 +34,7 @@ impl Docker {
         #[builder(start_fn)] name: &str,
         #[builder(field)] labels: IndexMap<String, String>,
     ) -> Result<Volume> {
-        let url = self.url("volumes/create");
+        let url = self.url(["volumes", "create"])?;
         let body = serde_json::json!({ "Name": name, "Labels": labels });
         self.http().post(url).json(&body).try_send().await
     }
@@ -45,7 +45,7 @@ impl Docker {
         &self,
         #[builder(field)] filters: Vec<Filter>,
     ) -> Result<Vec<Volume>> {
-        let mut url = self.url("volumes");
+        let mut url = self.url(["volumes"])?;
         if !filters.is_empty() {
             url.query_pairs_mut()
                 .append_pair("filters", &filters.to_docker_query());
@@ -61,7 +61,7 @@ impl Docker {
         #[builder(start_fn)] name: &str,
         #[builder(default)] force: bool,
     ) -> Result<()> {
-        let mut url = self.url(&format!("volumes/{name}"));
+        let mut url = self.url(["volumes", name])?;
         if force {
             url.query_pairs_mut().append_pair("force", "true");
         }

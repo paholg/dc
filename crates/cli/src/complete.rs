@@ -28,7 +28,7 @@ pub(crate) fn complete_project(current: &OsStr) -> Vec<CompletionCandidate> {
 }
 
 pub(crate) fn complete_workspace(current: &OsStr) -> Vec<CompletionCandidate> {
-    complete_workspace_inner(current).unwrap()
+    complete_workspace_inner(current).unwrap_or_default()
 }
 
 fn complete_workspace_inner(current: &OsStr) -> eyre::Result<Vec<CompletionCandidate>> {

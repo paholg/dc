@@ -198,6 +198,10 @@ async fn build_via_cli(
         cmd.args(["--label", &format!("{key}={value}")]);
     }
     for arg in [
+        // `ARG BASE_IMAGE` has no default, which BuildKit's linter warns
+        // about. Skipping the rule here keeps the vendored Dockerfile
+        // byte-identical to upstream.
+        "BUILDKIT_DOCKERFILE_CHECK=skip=InvalidDefaultArgInFrom".to_string(),
         format!("BASE_IMAGE={base_image}"),
         format!("REMOTE_USER={}", update.remote_user),
         format!("NEW_UID={}", update.new_uid),

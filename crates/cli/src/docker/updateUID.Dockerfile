@@ -1,7 +1,8 @@
 #  Copyright (c) Microsoft Corporation. All rights reserved.
 #  Licensed under the MIT License. See License.txt in the project root for license information.
 #
-#  Vendored from devcontainers/cli `scripts/updateUID.Dockerfile`.
+#  Vendored from devcontainers/cli `scripts/updateUID.Dockerfile`:
+#  https://github.com/devcontainers/cli/blob/main/scripts/updateUID.Dockerfile
 #
 #  Editing /etc/passwd and /etc/group with `sed` rather than usermod/groupmod is
 #  deliberate: busybox-based images (alpine and friends) ship neither.

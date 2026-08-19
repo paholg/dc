@@ -28,7 +28,7 @@ async fn remove_force_kills_a_running_container() {
         .await
         .expect_err("container should be gone");
     assert!(
-        matches!(err, Error::NotFound),
+        matches!(err, Error::NotFound { .. }),
         "expected NotFound, got {err:?}"
     );
 }
@@ -42,7 +42,7 @@ async fn remove_missing_container_returns_not_found() {
         .await
         .expect_err("missing container should error");
     assert!(
-        matches!(err, Error::NotFound),
+        matches!(err, Error::NotFound { .. }),
         "expected NotFound, got {err:?}"
     );
 }

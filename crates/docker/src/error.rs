@@ -31,8 +31,10 @@ pub enum Error {
     #[snafu(display("docker API returned {status}: {message}"))]
     Api { status: u16, message: String },
 
-    #[snafu(display("not found"))]
-    NotFound,
+    /// The daemon answered 404. `message` is what it said, which distinguishes
+    /// "no such container" from a request that reached no endpoint at all.
+    #[snafu(display("not found{}{message}", if message.is_empty() { "" } else { ": " }))]
+    NotFound { message: String },
 
     #[snafu(display("{segment:?} cannot be used as a URL path segment"))]
     InvalidPathSegment { segment: String },

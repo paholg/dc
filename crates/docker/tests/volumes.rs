@@ -50,7 +50,7 @@ async fn remove_missing_volume_returns_not_found() {
         .await
         .expect_err("missing volume should error");
     assert!(
-        matches!(err, Error::NotFound),
+        matches!(err, Error::NotFound { .. }),
         "expected NotFound, got {err:?}",
     );
 }

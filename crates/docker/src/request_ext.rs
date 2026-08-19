@@ -2,8 +2,7 @@ use reqwest::{RequestBuilder, StatusCode};
 use serde::de::DeserializeOwned;
 use snafu::ResultExt;
 
-use crate::Error;
-use crate::error::{ApiSnafu, JsonSnafu};
+use crate::error::{ApiSnafu, JsonSnafu, NotFoundSnafu};
 
 pub(crate) trait ReqwestExt {
     async fn try_send<T: DeserializeOwned>(self) -> crate::Result<T>;
@@ -65,11 +64,11 @@ async fn check_response(request: RequestBuilder) -> crate::Result<reqwest::Respo
 /// Classify a response that has already been sent.
 async fn check_status(response: reqwest::Response) -> crate::Result<reqwest::Response> {
     let status = response.status();
-    if status == StatusCode::NOT_FOUND {
-        return Err(Error::NotFound);
-    }
     if !status.is_success() {
-        let message = response.text().await.unwrap_or_default();
+        let message = daemon_message(response).await;
+        if status == StatusCode::NOT_FOUND {
+            return NotFoundSnafu { message }.fail();
+        }
         return ApiSnafu {
             status: status.as_u16(),
             message,
@@ -77,6 +76,23 @@ async fn check_status(response: reqwest::Response) -> crate::Result<reqwest::Res
         .fail();
     }
     Ok(response)
+}
+
+/// The daemon's own words for a failure.
+///
+/// Errors come back as `{"message": "No such container: ..."}`; anything that
+/// isn't that shape is reported verbatim, trimmed.
+async fn daemon_message(response: reqwest::Response) -> String {
+    #[derive(serde::Deserialize)]
+    struct ErrorBody {
+        message: String,
+    }
+
+    let body = response.text().await.unwrap_or_default();
+    match serde_json::from_str::<ErrorBody>(&body) {
+        Ok(parsed) => parsed.message,
+        Err(_) => body.trim().to_owned(),
+    }
 }
 
 /// As [`check_response`], reading the body to completion.

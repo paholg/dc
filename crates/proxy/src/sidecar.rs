@@ -154,7 +154,7 @@ async fn remove_stale_sidecars(docker: &Docker, project: &str, workspace: &str, 
 /// Remove a sidecar by its container ID. Errors are logged, not propagated.
 pub async fn remove_sidecar(docker: &Docker, id: &str) {
     match docker.remove_container(id).force(true).call().await {
-        Ok(()) | Err(docker::Error::NotFound) => {}
+        Ok(()) | Err(docker::Error::NotFound { .. }) => {}
         Err(e) => tracing::warn!(id = %id, "remove sidecar: {e}"),
     }
 }
@@ -179,7 +179,7 @@ pub async fn sweep_orphans(docker: &Docker) -> Result<()> {
         };
         let alive = match docker.inspect_container(&target_cid).await {
             Ok(d) => d.state.running,
-            Err(docker::Error::NotFound) => false,
+            Err(docker::Error::NotFound { .. }) => false,
             Err(e) => {
                 tracing::warn!(cid = %target_cid, "inspect target during sweep: {e}");
                 true

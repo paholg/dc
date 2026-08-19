@@ -43,9 +43,12 @@ async fn inspect_returns_not_found_for_missing_container() {
         .await
         .expect_err("missing container should error");
 
+    let Error::NotFound { message } = &err else {
+        panic!("expected Error::NotFound, got {err:?}");
+    };
     assert!(
-        matches!(err, Error::NotFound),
-        "expected Error::NotFound, got {err:?}",
+        message.contains("docker-crate-test-does-not-exist"),
+        "the daemon's explanation should survive: {message:?}",
     );
 }
 

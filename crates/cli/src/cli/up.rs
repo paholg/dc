@@ -292,7 +292,7 @@ impl Up {
             // build` to do, so the image may not be here yet — `up` used to be
             // what fetched it. Pull through compose rather than the API so the
             // user's registry credentials apply.
-            Err(docker::Error::NotFound) => {
+            Err(docker::Error::NotFound { .. }) => {
                 compose_pull(devcontainer, workspace).await?;
                 client
                     .inspect_image(&base_image)

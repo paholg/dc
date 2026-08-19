@@ -273,7 +273,9 @@ pub(super) async fn run_proxy(
         Ok(details) => Some(details),
         Err(e) => {
             let why = match e {
-                docker::Error::NotFound => "the proxy isn't there; run `dc proxy up`".to_string(),
+                docker::Error::NotFound { .. } => {
+                    "the proxy isn't there; run `dc proxy up`".to_string()
+                }
                 e => format!("couldn't inspect the proxy container: {e}"),
             };
             out.update(|c| {
@@ -399,7 +401,7 @@ fn trust_verdict(
 /// has since been re-pulled under the same tag means a restart is due.
 async fn check_image(docker: &Docker, running_image_id: &str) -> Check {
     match docker.inspect_image(&PROXY_IMAGE).await {
-        Err(docker::Error::NotFound) => {
+        Err(docker::Error::NotFound { .. }) => {
             Check::skip_because(format!("{} isn't present locally", *PROXY_IMAGE))
         }
         Err(e) => Check::fail(format!("couldn't inspect {}: {e}", *PROXY_IMAGE)),

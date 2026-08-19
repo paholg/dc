@@ -123,7 +123,7 @@ impl Docker {
     pub async fn ensure_image(&self, name: &str) -> Result<()> {
         match self.inspect_image(name).await {
             Ok(_) => Ok(()),
-            Err(crate::Error::NotFound) => self.pull_image(name).await,
+            Err(crate::Error::NotFound { .. }) => self.pull_image(name).await,
             Err(e) => Err(e),
         }
     }

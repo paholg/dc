@@ -143,7 +143,7 @@ async fn remove_proxy_group(docker: &Docker) -> Result<()> {
 
     for c in members {
         match docker.remove_container(&c.id).force(true).call().await {
-            Ok(()) | Err(docker::Error::NotFound) => {}
+            Ok(()) | Err(docker::Error::NotFound { .. }) => {}
             Err(e) => tracing::warn!(id = %c.id, "remove proxy-group container: {e}"),
         }
     }
@@ -224,7 +224,7 @@ pub(crate) async fn ensure_up(proxy: ProxyState) -> Result<()> {
                 State::Down
             }
         }
-        Err(docker::Error::NotFound) => State::Down,
+        Err(docker::Error::NotFound { .. }) => State::Down,
         Err(e) => return Err(e).wrap_err("inspect proxy"),
     };
 
@@ -257,7 +257,9 @@ async fn wait_for_ready(docker: &Docker, id: &str, port: u16) -> Result<()> {
         match docker.inspect_container(id).await {
             Ok(d) if d.state.running => break,
             Ok(_) => {}
-            Err(docker::Error::NotFound) => eyre::bail!("proxy container vanished after start"),
+            Err(docker::Error::NotFound { .. }) => {
+                eyre::bail!("proxy container vanished after start")
+            }
             Err(e) => return Err(e).wrap_err("inspect proxy after start"),
         }
         if std::time::Instant::now() >= deadline {

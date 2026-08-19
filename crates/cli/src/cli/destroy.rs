@@ -132,7 +132,7 @@ impl Runnable for Cleanup<'_> {
             {
                 for c in summaries {
                     match client.remove_container(&c.id).force(true).call().await {
-                        Ok(()) | Err(docker::Error::NotFound) => {}
+                        Ok(()) | Err(docker::Error::NotFound { .. }) => {}
                         Err(e) => {
                             tracing::warn!(container = %c.id, "failed to remove sidecar: {e}");
                         }
@@ -150,7 +150,7 @@ impl Runnable for Cleanup<'_> {
             {
                 for image in images {
                     match client.remove_image(&image.id).force(true).call().await {
-                        Ok(()) | Err(docker::Error::NotFound) => {}
+                        Ok(()) | Err(docker::Error::NotFound { .. }) => {}
                         Err(e) => {
                             tracing::warn!(image = %image.id, "failed to remove image: {e}");
                         }

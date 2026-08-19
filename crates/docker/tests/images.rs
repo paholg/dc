@@ -19,7 +19,7 @@ async fn inspect_returns_not_found_for_unknown_image() {
         .await
         .expect_err("missing image should error");
     assert!(
-        matches!(err, Error::NotFound),
+        matches!(err, Error::NotFound { .. }),
         "expected NotFound, got {err:?}"
     );
 }
@@ -48,7 +48,7 @@ async fn pull_unknown_image_returns_error() {
     // - it returns 200 and emits an error event mid-stream (mapped to Api).
     // Both are legitimate outcomes; the test only cares that the pull failed.
     assert!(
-        matches!(err, Error::Api { .. } | Error::NotFound),
+        matches!(err, Error::Api { .. } | Error::NotFound { .. }),
         "expected Api or NotFound, got {err:?}",
     );
 }
@@ -126,7 +126,10 @@ async fn list_by_label_then_remove() {
         .expect("remove");
 
     assert!(
-        matches!(client.inspect_image(&tag).await, Err(Error::NotFound)),
+        matches!(
+            client.inspect_image(&tag).await,
+            Err(Error::NotFound { .. })
+        ),
         "the tag should be gone after removal"
     );
 }
@@ -172,7 +175,7 @@ async fn remove_missing_image_returns_not_found() {
         .await
         .expect_err("missing image should error");
     assert!(
-        matches!(err, Error::NotFound),
+        matches!(err, Error::NotFound { .. }),
         "expected NotFound, got {err:?}",
     );
 }

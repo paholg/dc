@@ -280,7 +280,7 @@ pub(crate) async fn remove_sidecars(
         .await?;
     for c in sidecars {
         match client.remove_container(&c.id).force(true).call().await {
-            Ok(()) | Err(docker::Error::NotFound) => {}
+            Ok(()) | Err(docker::Error::NotFound { .. }) => {}
             Err(e) => tracing::warn!(container = %c.id, "failed to remove sidecar: {e}"),
         }
     }
@@ -293,7 +293,7 @@ pub(crate) async fn remove_sidecars(
         .await?;
     for vol in volumes {
         match client.remove_volume(&vol.name).call().await {
-            Ok(()) | Err(docker::Error::NotFound) => {}
+            Ok(()) | Err(docker::Error::NotFound { .. }) => {}
             Err(e) => tracing::warn!(volume = %vol.name, "failed to remove volume: {e}"),
         }
     }

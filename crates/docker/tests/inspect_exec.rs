@@ -49,7 +49,7 @@ async fn inspect_exec_returns_not_found_for_missing() {
         .await
         .expect_err("missing exec should error");
     assert!(
-        matches!(err, Error::NotFound),
+        matches!(err, Error::NotFound { .. }),
         "expected NotFound, got {err:?}"
     );
 }

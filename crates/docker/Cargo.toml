@@ -6,6 +6,7 @@ description = "Minimal client for the Docker / Podman Engine API"
 publish = false
 
 [dependencies]
+base64 = "0.22"
 bon = { workspace = true }
 bytes = "1.12"
 futures-util = "0.3"
@@ -19,7 +20,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 snafu = "0.9"
 strum = { version = "0.28.0", features = ["derive"] }
-tokio = { workspace = true, features = ["fs", "net", "process"] }
+tokio = { workspace = true, features = ["fs", "io-util", "net", "process"] }
 tracing = { workspace = true }
 
 [dev-dependencies]

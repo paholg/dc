@@ -1091,6 +1091,7 @@ dependencies = [
 name = "docker"
 version = "0.0.27"
 dependencies = [
+ "base64",
  "bon",
  "bytes",
  "futures-util",

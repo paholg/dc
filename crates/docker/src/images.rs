@@ -8,6 +8,7 @@ use crate::client::Docker;
 use crate::container::null_as_default;
 use crate::error::{ApiSnafu, JsonSnafu, Result};
 use crate::filter::{Filter, FilterSliceExt};
+use crate::registry_auth;
 use crate::request_ext::ReqwestExt;
 
 /// Subset of `GET /images/{name}/json`
@@ -145,7 +146,13 @@ impl Docker {
         let mut url = self.url(["images", "create"])?;
         url.query_pairs_mut().append_pair("fromImage", name);
 
-        let events: Vec<PullEvent> = self.http().post(url).try_send_ndjson().await?;
+        // The daemon does the pull, so it is the one that has to authenticate.
+        let mut request = self.http().post(url);
+        if let Some(auth) = registry_auth::for_image(name).await {
+            request = request.header("X-Registry-Auth", auth.header_value());
+        }
+
+        let events: Vec<PullEvent> = request.try_send_ndjson().await?;
         for event in events {
             if event.error.is_some() || event.error_detail.is_some() {
                 let message = event

@@ -13,6 +13,7 @@ mod events;
 mod exec;
 mod filter;
 mod images;
+mod registry_auth;
 mod request_ext;
 mod socket;
 mod stats;

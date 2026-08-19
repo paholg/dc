@@ -1,0 +1,23 @@
+# Prompt for demo recordings; used by `demos/tape.bashrc` via `STARSHIP_CONFIG`.
+#
+# NOTE: The prompt char needs to match the one in `demos/lib/setup.tape`.
+
+"$schema" = "https://starship.rs/config-schema.json"
+
+format = "$directory$git_branch$character"
+add_newline = false
+
+[directory]
+# The default format ends in a space; the modules here add their own.
+format = "[$path]($style)"
+style = "bold cyan"
+truncation_length = 2
+
+[git_branch]
+format = " [$symbol$branch]($style)"
+style = "bold purple"
+
+[character]
+format = " $symbol "
+success_symbol = "[❯](bold green)"
+error_symbol = "[❯](bold red)"

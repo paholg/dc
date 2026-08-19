@@ -1,0 +1,7 @@
+# The config demos are recorded against, so a recording doesn't depend on
+# whatever is in your real `config.toml`. `record.sh` and `shell.sh`
+# point `DEVCONCURRENT_CONFIG` at this directory.
+
+[projects.dcex]
+path = "/tmp/dcex"
+worktreeFolder = "/tmp/dcex-worktrees"

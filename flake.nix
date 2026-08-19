@@ -163,6 +163,7 @@
               cargo-machete
               cargo-nextest
               fd
+              gh-markdown-preview
               jq
               just
               mdbook
@@ -172,11 +173,12 @@
               pandoc
               rumdl
               vhs
+              # For recording demos:
+              bashInteractive
+              starship
+              xh
             ]
             ++ [ rust ];
-          env = {
-            RUST_BACKTRACE = 1;
-          };
         };
       }
     );

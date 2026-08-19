@@ -37,6 +37,7 @@ jobs:
         with:
           primary-key: nix-${{ runner.os }}-${{ matrix.arch }}-${{ hashFiles('flake.lock', '**/Cargo.lock') }}
           restore-prefixes-first-match: nix-${{ runner.os }}-${{ matrix.arch }}-
+          save: false
 
       - name: Log in to GHCR
         uses: docker/login-action@v3

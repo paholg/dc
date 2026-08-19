@@ -49,12 +49,15 @@ jobs:
       - uses: nixbuild/nix-quick-install-action@v32
       - uses: nix-community/cache-nix-action@v6
         with:
-          primary-key: nix-${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          paths: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
+          primary-key: nix-${{ runner.os }}-cargo-${{ hashFiles('flake.lock', '**/Cargo.lock') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-cargo-
+          # Keep one generation per lineage. These caches are ~2 GiB each and
+          # the repo-wide budget is 10 GB; without this, old generations
+          # accumulate until GitHub evicts the caches we actually want.
+          purge: true
+          purge-prefixes: nix-${{ runner.os }}-cargo-
+          purge-created: 0
+          purge-primary-key: never
       - run: nix flake check --print-build-logs
 
   docker-crate:
@@ -109,6 +112,10 @@ jobs:
         with:
           primary-key: nix-${{ runner.os }}-image-${{ hashFiles('flake.lock', '**/Cargo.lock') }}
           restore-prefixes-first-match: nix-${{ runner.os }}-image-
+          purge: true
+          purge-prefixes: nix-${{ runner.os }}-image-
+          purge-created: 0
+          purge-primary-key: never
       - run: nix build .#docker-service-image --print-build-logs
 
   generate-check:
@@ -145,6 +152,10 @@ jobs:
         with:
           primary-key: nix-${{ runner.os }}-docs-${{ hashFiles('flake.lock') }}
           restore-prefixes-first-match: nix-${{ runner.os }}-docs-
+          purge: true
+          purge-prefixes: nix-${{ runner.os }}-docs-
+          purge-created: 0
+          purge-primary-key: never
       - run: nix build .#docs --print-build-logs
       # Copy out of the nix store so the artifact has writable, non-symlinked files.
       - name: Stage site

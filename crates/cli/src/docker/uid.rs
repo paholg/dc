@@ -262,7 +262,7 @@ impl Runnable for BuildDerivedImage<'_> {
             .context(build_single_file_tar(
                 "Dockerfile",
                 UPDATE_UID_DOCKERFILE.as_bytes(),
-            ))
+            )?)
             .maybe_platform(self.update.platform.as_deref())
             .on_output(&mut report)
             .with_build_arg("BASE_IMAGE", self.base_image)
@@ -482,7 +482,7 @@ mod docker_tests {
 
         client
             .build_image(&tag)
-            .context(build_single_file_tar("Dockerfile", dockerfile.as_bytes()))
+            .context(build_single_file_tar("Dockerfile", dockerfile.as_bytes()).expect("build tar"))
             .with_label(key, value)
             .call()
             .await

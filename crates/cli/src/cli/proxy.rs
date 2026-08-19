@@ -320,7 +320,8 @@ async fn push_intermediate(
     let tar = docker::build_archive(&[
         (PROXY_CA_CERT_FILE, intermediate.cert_pem.as_bytes()),
         (PROXY_CA_KEY_FILE, intermediate.key_pem.as_bytes()),
-    ]);
+    ])
+    .wrap_err("build intermediate CA archive")?;
     docker
         .upload_archive(PROXY_CONTAINER_NAME, PROXY_CA_DIR, tar)
         .await

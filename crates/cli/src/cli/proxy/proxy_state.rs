@@ -87,7 +87,8 @@ impl ProxyState {
         let bytes =
             serde_json::to_vec_pretty(&self.options).wrap_err("serialize proxy projects")?;
 
-        let tar = docker::build_single_file_tar(PROXY_CONFIG_FILE, &bytes);
+        let tar = docker::build_single_file_tar(PROXY_CONFIG_FILE, &bytes)
+            .wrap_err("build proxy config archive")?;
         self.docker
             .upload_archive(PROXY_CONTAINER_NAME, PROXY_CONFIG_DIR, tar)
             .await

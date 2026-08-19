@@ -66,10 +66,9 @@ impl Drop for ImageCleanup {
 
 /// Tag `alpine` under a fresh name carrying `labels`.
 async fn build_labelled_image(client: &Docker, tag: &str, labels: &[(&str, &str)]) {
-    let mut build = client.build_image(tag).context(build_single_file_tar(
-        "Dockerfile",
-        format!("FROM {IMAGE}\n").as_bytes(),
-    ));
+    let mut build = client.build_image(tag).context(
+        build_single_file_tar("Dockerfile", format!("FROM {IMAGE}\n").as_bytes()).expect("tar"),
+    );
     for (key, value) in labels {
         build = build.with_label(*key, *value);
     }
@@ -147,10 +146,13 @@ async fn a_failing_build_is_an_error() {
 
     let err = client
         .build_image(&tag)
-        .context(build_single_file_tar(
-            "Dockerfile",
-            format!("FROM {IMAGE}\nRUN exit 3\n").as_bytes(),
-        ))
+        .context(
+            build_single_file_tar(
+                "Dockerfile",
+                format!("FROM {IMAGE}\nRUN exit 3\n").as_bytes(),
+            )
+            .expect("tar"),
+        )
         .on_output(&mut |line: &str| output.push(line.to_string()))
         .call()
         .await

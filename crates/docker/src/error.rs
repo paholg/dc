@@ -47,6 +47,12 @@ pub enum Error {
 
     #[snafu(display("io error"))]
     Io { source: std::io::Error },
+
+    #[snafu(display("tar entry name is over 100 bytes: {name:?}"))]
+    TarNameTooLong { name: String },
+
+    #[snafu(display("tar entry {name:?} is {size} bytes; the ustar size field tops out at {max}"))]
+    TarFileTooLarge { name: String, size: u64, max: u64 },
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

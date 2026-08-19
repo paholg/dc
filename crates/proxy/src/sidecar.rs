@@ -115,7 +115,7 @@ pub async fn create_sidecar(
         files.push((SIDECAR_CERT_FILE, cert.as_slice()));
         files.push((SIDECAR_KEY_FILE, key.as_slice()));
     }
-    let tar = build_archive(&files);
+    let tar = build_archive(&files).wrap_err("build sidecar plan archive")?;
     docker
         .upload_archive(&id, SIDECAR_PLAN_DIR, tar)
         .await

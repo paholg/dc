@@ -84,7 +84,10 @@ pub(crate) async fn forward(
             .ensure_image(SOCAT_IMAGE)
             .await?;
 
-        let volume_name = format!("devconcurrent-fwd-{}", sidecar_key(workspace));
+        let volume_name = shared::container_name(
+            "devconcurrent-fwd-vol",
+            &[workspace.state.project_name.as_str(), &workspace.name],
+        );
 
         let mut create = devcontainer
             .docker()
@@ -126,11 +129,6 @@ pub(crate) async fn forward(
     Ok(())
 }
 
-/// The unique identifier for a fwd sidecar.
-fn sidecar_key(workspace: &Workspace<'_>) -> String {
-    format!("{}-{}", workspace.state.project_name, workspace.name)
-}
-
 async fn container_network(client: &docker::Docker, cid: &str) -> eyre::Result<String> {
     let details = client.inspect_container(cid).await?;
     details
@@ -150,7 +148,10 @@ async fn create_inner_sidecar(
     volume_name: &str,
     ports: &[ForwardPort],
 ) -> eyre::Result<()> {
-    let name = format!("devconcurrent-fwd-inner-{}", sidecar_key(workspace));
+    let name = shared::container_name(
+        "devconcurrent-fwd-inner",
+        &[workspace.state.project_name.as_str(), &workspace.name],
+    );
 
     let socat_cmds: Vec<String> = ports
         .iter()
@@ -191,7 +192,10 @@ async fn create_outer_sidecar(
     volume_name: &str,
     ports: &[ForwardPort],
 ) -> eyre::Result<()> {
-    let name = format!("devconcurrent-fwd-{}", sidecar_key(workspace));
+    let name = shared::container_name(
+        "devconcurrent-fwd-outer",
+        &[workspace.state.project_name.as_str(), &workspace.name],
+    );
 
     let socat_cmds: Vec<String> = ports
         .iter()

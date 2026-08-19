@@ -53,6 +53,46 @@ pub const ENV_CA_DIR: &str = "DEVCONCURRENT_PROXY_CA_DIR";
 /// Default Handlebars template for proxied hostnames.
 pub const DEFAULT_HOSTNAME_TEMPLATE: &str = "{{workspace}}.{{service}}.test";
 
+/// Build a docker container or volume name from a fixed `prefix` and the
+/// identity `parts` it belongs to.
+///
+/// The parts are joined with `-` so the name stays readable, but that half is
+/// not injective: `-` is legal *inside* a project, workspace, or service name,
+/// and characters docker forbids fold to `_`. So `("a-b", "c")` and
+/// `("a", "b-c")` read alike, as do `("a/b", "c")` and `("a_b", "c")`. A short
+/// digest of the raw, length-prefixed parts is appended, so distinct tuples
+/// always get distinct names — which matters because a name is what docker
+/// enforces uniqueness on.
+///
+/// `prefix` is expected to be a literal, so it supplies the alphanumeric
+/// leading character docker requires.
+#[must_use]
+pub fn container_name(prefix: &str, parts: &[&str]) -> String {
+    let mut hasher = Sha256::new();
+    for part in parts {
+        // Length-prefixed, so no concatenation of parts can be mistaken for a
+        // different split of the same bytes.
+        hasher.update((part.len() as u64).to_le_bytes());
+        hasher.update(part.as_bytes());
+    }
+    let digest = hasher.finalize();
+    let suffix: String = digest.iter().take(4).map(|b| format!("{b:02x}")).collect();
+
+    let readable: String = parts
+        .join("-")
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+
+    format!("{prefix}-{readable}-{suffix}")
+}
+
 /// Per-project proxy configuration.
 #[derive(Deserialize, Serialize, Clone, Debug, Default, JsonSchema)]
 #[serde(rename_all = "camelCase", default)]
@@ -497,5 +537,37 @@ mod tests {
     #[test]
     fn rejects_invalid_template() {
         assert!(serde_json::from_str::<Template>("\"{{#unclosed\"").is_err());
+    }
+
+    #[test]
+    fn container_name_is_deterministic() {
+        let name = container_name("pre", &["a", "b", "c"]);
+        assert_eq!(name, container_name("pre", &["a", "b", "c"]));
+        assert!(name.starts_with("pre-a-b-c-"), "unexpected name {name}");
+    }
+
+    #[test]
+    fn container_name_distinguishes_parts_the_join_cannot() {
+        // The readable half of both is `pre-a-b-c-…`.
+        assert_ne!(
+            container_name("pre", &["a-b", "c"]),
+            container_name("pre", &["a", "b-c"]),
+        );
+        // The readable half of both is `pre-a_b-c-…`.
+        assert_ne!(
+            container_name("pre", &["a/b", "c"]),
+            container_name("pre", &["a_b", "c"]),
+        );
+    }
+
+    #[test]
+    fn container_name_is_legal_for_docker() {
+        let name = container_name("pre", &["a/b", "c:d", "é", ""]);
+        let mut chars = name.chars();
+        assert!(chars.next().unwrap().is_ascii_alphanumeric());
+        assert!(
+            chars.all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.')),
+            "unexpected character in {name}",
+        );
     }
 }

@@ -78,16 +78,19 @@ pub async fn create_sidecar(
         .await
         .wrap_err("ensure sidecar image")?;
 
-    let name = sanitize_container_name(&format!(
-        "devconcurrent-proxy-sidecar-{project}-{workspace}-{service}"
-    ));
+    let name = shared::container_name(
+        "devconcurrent-proxy-sidecar",
+        &[project, workspace, service],
+    );
     let network_mode = format!("container:{target_cid}");
 
     let plan_json = serde_json::to_vec_pretty(&plan).wrap_err("serialize sidecar plan")?;
 
     // If a stale sidecar exists from a previous run, force-remove it first. We
-    // find it by the labels below rather than by name, so we can never delete a
-    // container that merely happens to share the name.
+    // find it by the labels below rather than by name: the name is a
+    // convenience, and matching on it would let us delete a container that
+    // merely happens to share it — including one built by an older version,
+    // whose naming scheme differed.
     remove_stale_sidecars(docker, project, workspace, service).await;
 
     let id = docker
@@ -188,16 +191,4 @@ pub async fn sweep_orphans(docker: &Docker) -> Result<()> {
         }
     }
     Ok(())
-}
-
-fn sanitize_container_name(s: &str) -> String {
-    s.chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.' {
-                c
-            } else {
-                '_'
-            }
-        })
-        .collect()
 }

@@ -59,7 +59,11 @@ pub(crate) async fn forward(
 
     let ws = workspace.devcontainer(devcontainer).await?;
     let cid = ws.service_container_id()?;
-    let ports = &devcontainer.config.forward_ports;
+
+    let (ports, warnings) = dedup_forward_ports(&devcontainer.config.forward_ports);
+    for warning in warnings {
+        tracing::warn!("{warning}");
+    }
 
     if ports.is_empty() {
         return Ok(());
@@ -129,6 +133,27 @@ pub(crate) async fn forward(
     Ok(())
 }
 
+/// Drop entries that would claim a host port another entry already claimed.
+fn dedup_forward_ports(ports: &[ForwardPort]) -> (Vec<ForwardPort>, Vec<String>) {
+    let mut kept: Vec<ForwardPort> = Vec::with_capacity(ports.len());
+    let mut warnings = Vec::new();
+
+    for fwd_port in ports {
+        let port = fwd_port.port;
+        match kept.iter().find(|k| k.port == port) {
+            Some(first) if first == fwd_port => warnings.push(format!(
+                "forwardPorts: {fwd_port} is listed more than once; ignoring the duplicate"
+            )),
+            Some(first) => warnings.push(format!(
+                "forwardPorts: host port {port} is already claimed by {first}; ignoring {fwd_port}",
+            )),
+            None => kept.push(fwd_port.clone()),
+        }
+    }
+
+    (kept, warnings)
+}
+
 async fn container_network(client: &docker::Docker, cid: &str) -> eyre::Result<String> {
     let details = client.inspect_container(cid).await?;
     details
@@ -156,6 +181,8 @@ async fn create_inner_sidecar(
     let socat_cmds: Vec<String> = ports
         .iter()
         .map(|p| {
+            // The socket is named after the port alone, which is unique because
+            // `dedup_forward_ports` dropped any second claim on it.
             let target = p.service.as_deref().unwrap_or("127.0.0.1");
             format!(
                 "socat UNIX-LISTEN:/socks/{}.sock,fork,reuseaddr TCP:{target}:{}",
@@ -273,4 +300,62 @@ pub(crate) async fn remove_sidecars(
 
 fn port_is_free(port: u16) -> bool {
     std::net::TcpListener::bind(("127.0.0.1", port)).is_ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn port(port: u16) -> ForwardPort {
+        ForwardPort {
+            service: None,
+            port,
+        }
+    }
+
+    fn service_port(service: &str, port: u16) -> ForwardPort {
+        ForwardPort {
+            service: Some(service.to_string()),
+            port,
+        }
+    }
+
+    #[test]
+    fn distinct_ports_pass_through_in_order() {
+        let ports = vec![port(3000), service_port("db", 5432), port(8080)];
+        let (kept, warnings) = dedup_forward_ports(&ports);
+        assert_eq!(kept, ports);
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn an_exactly_repeated_entry_is_kept_once() {
+        let (kept, warnings) = dedup_forward_ports(&[port(3000), port(3000)]);
+        assert_eq!(kept, vec![port(3000)]);
+        assert_eq!(warnings.len(), 1);
+        assert!(
+            warnings[0].contains("listed more than once"),
+            "unexpected warning: {}",
+            warnings[0]
+        );
+    }
+
+    #[test]
+    fn two_services_claiming_one_host_port_keeps_the_first() {
+        let (kept, warnings) = dedup_forward_ports(&[port(3000), service_port("db", 3000)]);
+        assert_eq!(kept, vec![port(3000)]);
+        assert_eq!(warnings.len(), 1);
+        assert!(
+            warnings[0].contains("already claimed by"),
+            "unexpected warning: {}",
+            warnings[0]
+        );
+    }
+
+    #[test]
+    fn a_service_mapping_can_be_the_first_claim() {
+        let (kept, warnings) = dedup_forward_ports(&[service_port("db", 3000), port(3000)]);
+        assert_eq!(kept, vec![service_port("db", 3000)]);
+        assert_eq!(warnings.len(), 1);
+    }
 }

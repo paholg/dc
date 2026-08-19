@@ -8,6 +8,9 @@ use crate::error::{ApiSnafu, JsonSnafu};
 pub(crate) trait ReqwestExt {
     async fn try_send<T: DeserializeOwned>(self) -> crate::Result<T>;
     async fn try_send_empty(self) -> crate::Result<()>;
+    /// As [`Self::try_send_empty`], but for state changes the daemon reports
+    /// as 304 when the object is already in the requested state.
+    async fn try_send_empty_or_unchanged(self) -> crate::Result<()>;
     /// Drain a newline-delimited JSON response, parsing each non-empty line
     /// into `T`. Drops any blank lines.
     async fn try_send_ndjson<T: DeserializeOwned>(self) -> crate::Result<Vec<T>>;
@@ -26,6 +29,14 @@ impl ReqwestExt for RequestBuilder {
 
     async fn try_send_empty(self) -> crate::Result<()> {
         check_response_body(self).await.map(drop)
+    }
+
+    async fn try_send_empty_or_unchanged(self) -> crate::Result<()> {
+        let response = self.send().await?;
+        if response.status() == StatusCode::NOT_MODIFIED {
+            return Ok(());
+        }
+        check_status(response).await.map(drop)
     }
 
     async fn try_send_ndjson<T: DeserializeOwned>(self) -> crate::Result<Vec<T>> {
@@ -48,7 +59,11 @@ impl ReqwestExt for RequestBuilder {
 /// Send and validate; returns the response with its body unread. Maps 404 to
 /// [`Error::NotFound`] and other non-success statuses to [`Error::Api`].
 async fn check_response(request: RequestBuilder) -> crate::Result<reqwest::Response> {
-    let response = request.send().await?;
+    check_status(request.send().await?).await
+}
+
+/// Classify a response that has already been sent.
+async fn check_status(response: reqwest::Response) -> crate::Result<reqwest::Response> {
     let status = response.status();
     if status == StatusCode::NOT_FOUND {
         return Err(Error::NotFound);

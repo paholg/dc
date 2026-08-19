@@ -188,9 +188,12 @@ impl Docker {
     }
 
     /// `POST /containers/{id}/start` — start a stopped container.
+    ///
+    /// Starting a container that is already running is not an error: the
+    /// daemon answers 304, which this reports as success.
     pub async fn start_container(&self, id: &str) -> Result<()> {
         let url = self.url(["containers", id, "start"])?;
-        self.http().post(url).try_send_empty().await
+        self.http().post(url).try_send_empty_or_unchanged().await
     }
 }
 

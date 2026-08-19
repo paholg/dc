@@ -103,6 +103,40 @@ async fn create_with_port_binding_publishes_on_host() {
     );
 }
 
+/// The daemon answers 304 for a container that is already running; that is
+/// "nothing to do", not a failure.
+#[tokio::test(flavor = "multi_thread")]
+async fn starting_a_running_container_is_not_an_error() {
+    let client = Docker::connect().await.expect("connect");
+    pull_alpine(&client).await;
+
+    let name = unique_name();
+    let _cleanup = ContainerCleanup {
+        client: client.clone(),
+        name: name.clone(),
+    };
+    let (test_key, test_value) = TEST_LABEL.split_once('=').expect("TEST_LABEL is key=value");
+
+    let id = client
+        .create_container(&name)
+        .image(ALPINE)
+        .entrypoint(vec!["sh".to_string()])
+        .cmd(vec!["-c".to_string(), "sleep 30".to_string()])
+        .with_label(test_key, test_value)
+        .call()
+        .await
+        .expect("create_container");
+
+    client.start_container(&id).await.expect("first start");
+    client.start_container(&id).await.expect("second start");
+
+    let details = client
+        .inspect_container(&id)
+        .await
+        .expect("inspect_container");
+    assert_eq!(details.state.status, ContainerStatus::Running);
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn create_with_bind_mounts_the_volume() {
     let client = Docker::connect().await.expect("connect");

@@ -85,13 +85,10 @@ pub async fn create_sidecar(
 
     let plan_json = serde_json::to_vec_pretty(&plan).wrap_err("serialize sidecar plan")?;
 
-    // If a stale sidecar exists from a previous run, force-remove it first.
-    match docker.remove_container(&name).force(true).call().await {
-        Ok(()) | Err(docker::Error::NotFound) => {}
-        Err(e) => {
-            tracing::warn!(name = %name, "remove stale sidecar: {e}");
-        }
-    }
+    // If a stale sidecar exists from a previous run, force-remove it first. We
+    // find it by the labels below rather than by name, so we can never delete a
+    // container that merely happens to share the name.
+    remove_stale_sidecars(docker, project, workspace, service).await;
 
     let id = docker
         .create_container(&name)
@@ -126,6 +123,29 @@ pub async fn create_sidecar(
         .await
         .wrap_err("start sidecar container")?;
     Ok(Some(id))
+}
+
+/// Remove any sidecar already claiming this `(project, workspace, service)`.
+/// Errors are logged, not propagated: creation is about to fail loudly on its
+/// own if a sidecar really is in the way.
+async fn remove_stale_sidecars(docker: &Docker, project: &str, workspace: &str, service: &str) {
+    let stale = docker
+        .list_containers()
+        .all(true)
+        .with_label(PROXY_SIDECAR_LABEL, "true")
+        .with_label(PROJECT_LABEL, project)
+        .with_label(WORKSPACE_LABEL, workspace)
+        .with_label(PROXY_SERVICE_LABEL, service)
+        .call()
+        .await;
+    match stale {
+        Ok(stale) => {
+            for sc in stale {
+                remove_sidecar(docker, &sc.id).await;
+            }
+        }
+        Err(e) => tracing::warn!(project, workspace, service, "list stale sidecars: {e}"),
+    }
 }
 
 /// Remove a sidecar by its container ID. Errors are logged, not propagated.

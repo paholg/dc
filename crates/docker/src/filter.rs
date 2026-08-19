@@ -25,6 +25,14 @@ pub enum Filter {
 }
 
 impl Filter {
+    /// The name this clause demands, if it is a [`Filter::Name`].
+    pub(crate) fn as_name(&self) -> Option<&str> {
+        match self {
+            Self::Name(name) => Some(name),
+            _ => None,
+        }
+    }
+
     fn value(&self) -> String {
         match self {
             Self::Label {

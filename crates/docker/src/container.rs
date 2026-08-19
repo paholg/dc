@@ -223,8 +223,31 @@ impl Docker {
                 pairs.append_pair("filters", &filters.to_docker_query());
             }
         }
-        self.http().get(url).try_send().await
+        let mut containers: Vec<ContainerSummary> = self.http().get(url).try_send().await?;
+        retain_named(&mut containers, &filters);
+        Ok(containers)
     }
+}
+
+/// Drop everything the daemon returned that doesn't answer to one of the
+/// requested names.
+///
+/// Docker's `name` filter is a substring match, so asking for `foo` also
+/// returns `foo-bar`. The filter still goes to the daemon — it narrows the
+/// response — but the exact comparison happens here.
+fn retain_named(containers: &mut Vec<ContainerSummary>, filters: &[Filter]) {
+    let wanted: Vec<&str> = filters.iter().filter_map(Filter::as_name).collect();
+    if wanted.is_empty() {
+        return;
+    }
+    containers.retain(|container| {
+        container
+            .names
+            .iter()
+            // The daemon reports names path-style, rooted at `/`.
+            .map(|name| name.strip_prefix('/').unwrap_or(name))
+            .any(|name| wanted.contains(&name))
+    });
 }
 
 #[bon]
@@ -288,6 +311,7 @@ impl<S: docker_list_containers_builder::State> DockerListContainersBuilder<'_, S
         self
     }
 
+    /// Keep only containers whose name is exactly `name`.
     pub fn with_name(mut self, name: impl Into<String>) -> Self {
         self.filters.push(Filter::Name(name.into()));
         self
@@ -453,6 +477,57 @@ impl<S: docker_create_container_builder::State> DockerCreateContainerBuilder<'_,
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn summary_named(name: &str) -> ContainerSummary {
+        serde_json::from_str(&format!(
+            r#"{{"Id":"id-{name}","Names":["/{name}"],"Image":"alpine",
+                "State":"running","Created":0}}"#
+        ))
+        .expect("deserialize")
+    }
+
+    /// Docker's `name` filter matches substrings, so the daemon answers a
+    /// request for `foo` with `foo-bar` too.
+    #[test]
+    fn a_name_filter_keeps_only_the_exact_name() {
+        let mut containers = vec![
+            summary_named("foo"),
+            summary_named("foo-bar"),
+            summary_named("barfoo"),
+        ];
+        retain_named(&mut containers, &[Filter::Name("foo".to_string())]);
+        assert_eq!(
+            containers.iter().map(|c| c.id.as_str()).collect::<Vec<_>>(),
+            ["id-foo"]
+        );
+    }
+
+    #[test]
+    fn several_name_filters_are_a_union() {
+        let mut containers = vec![
+            summary_named("foo"),
+            summary_named("baz"),
+            summary_named("qux"),
+        ];
+        retain_named(
+            &mut containers,
+            &[
+                Filter::Name("foo".to_string()),
+                Filter::Name("qux".to_string()),
+            ],
+        );
+        assert_eq!(
+            containers.iter().map(|c| c.id.as_str()).collect::<Vec<_>>(),
+            ["id-foo", "id-qux"]
+        );
+    }
+
+    #[test]
+    fn other_filters_do_not_narrow_by_name() {
+        let mut containers = vec![summary_named("foo"), summary_named("bar")];
+        retain_named(&mut containers, &[Filter::Id("whatever".to_string())]);
+        assert_eq!(containers.len(), 2);
+    }
 
     #[test]
     fn port_empty_ip_is_none() {

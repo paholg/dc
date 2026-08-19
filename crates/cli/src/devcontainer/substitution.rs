@@ -79,7 +79,7 @@ impl<'a> Context<'a> {
     /// workspace folder.
     pub(crate) fn new(local_workspace_folder: &'a Path, labels: &'a DevcontainerLabels) -> Self {
         Self {
-            local_env: std::env::vars().collect(),
+            local_env: local_env(),
             local_workspace_folder,
             labels,
             container_workspace_folder: None,
@@ -113,6 +113,22 @@ impl<'a> Context<'a> {
         self.local_env = local_env;
         self
     }
+}
+
+/// The host environment, as far as it is nameable and representable.
+///
+/// `std::env::vars` panics on a non-Unicode variable, and it would panic even
+/// for a run that never mentions `${localEnv:…}`. A name that isn't valid UTF-8
+/// cannot be written in a devcontainer.json in the first place, so those entries
+/// are dropped; a value is converted lossily, which is what the reference
+/// implementation does with them.
+fn local_env() -> IndexMap<String, String> {
+    std::env::vars_os()
+        .filter_map(|(name, value)| {
+            let name = name.into_string().ok()?;
+            Some((name, value.to_string_lossy().into_owned()))
+        })
+        .collect()
 }
 
 /// A variable used where it cannot be resolved.

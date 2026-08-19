@@ -216,17 +216,29 @@ enum Stream {
 /// Forward a stream of a child's output as it arrives, keeping the tail of it in
 /// case the child fails.
 async fn forward<R: AsyncRead + Unpin>(reader: R, stream: Stream) -> Tail {
-    let mut lines = tokio::io::BufReader::new(reader).lines();
+    let mut reader = tokio::io::BufReader::new(reader);
     let mut tail = Tail::new();
-    while let Ok(Some(line)) = lines.next_line().await {
+    let mut buf = Vec::new();
+    // Bytes rather than `lines()`: that stops at the first line that isn't UTF-8,
+    // and dropping the reader mid-run leaves the child to die of SIGPIPE on its
+    // next write, with nothing to say why.
+    while let Ok(1..) = reader.read_until(b'\n', &mut buf).await {
+        let line = String::from_utf8_lossy(trim_newline(&buf));
         // Two callsites, because a `tracing` callsite has a fixed field set.
         match stream {
             Stream::Stdout => tracing::trace!(stdout = true, "{line}"),
             Stream::Stderr => tracing::trace!("{line}"),
         }
-        tail.push(line);
+        tail.push(line.into_owned());
+        buf.clear();
     }
     tail
+}
+
+/// Drop the line terminator, `\r\n` or `\n`, as `AsyncBufReadExt::lines` does.
+fn trim_newline(line: &[u8]) -> &[u8] {
+    let line = line.strip_suffix(b"\n").unwrap_or(line);
+    line.strip_suffix(b"\r").unwrap_or(line)
 }
 
 /// How a failed command is named in its error.
@@ -363,6 +375,15 @@ mod tests {
                 ),
             ]
         );
+    }
+
+    /// Output that isn't UTF-8 must not cut the stream short: the child keeps
+    /// writing, and everything after the bad line still has to arrive.
+    #[tokio::test]
+    async fn invalid_utf8_output_is_kept_lossily() {
+        let (_, stdout, _) = tails("printf 'a\\xffb\\nafter\\n'; exit 1").await;
+
+        assert_eq!(stdout.body(), "a\u{fffd}b\nafter");
     }
 
     /// A chatty command must not put its whole output back into the error.

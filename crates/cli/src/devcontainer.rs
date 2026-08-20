@@ -325,10 +325,10 @@ impl Mount {
         let mut ty = None;
         let mut source = None;
         let mut target = None;
+        let mut readonly = false;
         for pair in text.split(',') {
-            let (key, value) = pair
-                .split_once('=')
-                .ok_or_else(|| eyre::eyre!("mount entry missing `=`: {pair}"))?;
+            // `readonly`/`ro` may appear bare (no value) in docker's short form.
+            let (key, value) = pair.split_once('=').unwrap_or((pair, "true"));
             match key.trim() {
                 "type" => {
                     ty = Some(match value {
@@ -339,13 +339,24 @@ impl Mount {
                 }
                 "source" | "src" => source = Some(value.to_string()),
                 "target" | "dst" | "destination" => target = Some(value.to_string()),
-                _ => {} // ignore `readonly`, `consistency`, etc. — extending later if needed.
+                "readonly" | "ro" => {
+                    readonly = match value {
+                        "true" | "1" | "" => true,
+                        "false" | "0" => false,
+                        other => eyre::bail!("invalid readonly value: {other}"),
+                    };
+                }
+                _ if !pair.contains('=') => {
+                    eyre::bail!("mount entry missing `=`: {pair}")
+                }
+                _ => {} // ignore `consistency`, etc. — extending later if needed.
             }
         }
         Ok(MountFields {
             ty: ty.ok_or_else(|| eyre::eyre!("mount entry missing `type`: {text}"))?,
             source,
             target: target.ok_or_else(|| eyre::eyre!("mount entry missing `target`: {text}"))?,
+            readonly,
         })
     }
 
@@ -359,6 +370,7 @@ impl Mount {
             ty: self.ty,
             source,
             target: context.render_field("mounts.target", &self.target)?,
+            readonly: false,
         }
         .render())
     }
@@ -370,13 +382,16 @@ struct MountFields {
     ty: MountType,
     source: Option<String>,
     target: String,
+    readonly: bool,
 }
 
 impl MountFields {
     fn render(self) -> String {
+        let ro = if self.readonly { ":ro" } else { "" };
         match (self.ty, self.source) {
-            (_, Some(source)) => format!("{source}:{}", self.target),
-            // Anonymous volume: compose accepts just the target.
+            (_, Some(source)) => format!("{source}:{}{ro}", self.target),
+            // Anonymous volume: compose accepts just the target, but the short form has no
+            // slot for `ro` without a source.
             (MountType::Volume, None) => self.target,
             (MountType::Bind, None) => self.target, // unusual but pass through.
         }
@@ -565,6 +580,31 @@ mod tests {
             entry.to_compose_volume(&ctx()).unwrap(),
             "/local/data:/data"
         );
+    }
+
+    #[test]
+    fn mount_string_bind_readonly() {
+        let entry: MountEntry =
+            serde_json::from_str(r#""type=bind,source=/host,target=/in,readonly""#).unwrap();
+        assert_eq!(entry.to_compose_volume(&ctx()).unwrap(), "/host:/in:ro");
+    }
+
+    #[test]
+    fn mount_string_bind_ro_alias_with_value() {
+        let entry: MountEntry =
+            serde_json::from_str(r#""type=bind,source=/host,target=/in,ro=true""#).unwrap();
+        assert_eq!(entry.to_compose_volume(&ctx()).unwrap(), "/host:/in:ro");
+
+        let entry: MountEntry =
+            serde_json::from_str(r#""type=bind,source=/host,target=/in,readonly=false""#).unwrap();
+        assert_eq!(entry.to_compose_volume(&ctx()).unwrap(), "/host:/in");
+    }
+
+    #[test]
+    fn mount_string_unknown_bare_key_errors() {
+        let entry: MountEntry =
+            serde_json::from_str(r#""type=bind,source=/host,target=/in,bogus""#).unwrap();
+        assert!(entry.to_compose_volume(&ctx()).is_err());
     }
 
     #[test]

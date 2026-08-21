@@ -377,11 +377,12 @@ mod tests {
         );
     }
 
-    /// Output that isn't UTF-8 must not cut the stream short: the child keeps
-    /// writing, and everything after the bad line still has to arrive.
+    /// Output that isn't UTF-8 must not cut the stream short: everything after
+    /// the bad line still has to arrive. The bytes come straight from the test —
+    /// shells differ on whether `printf` produces 0xff from an escape.
     #[tokio::test]
     async fn invalid_utf8_output_is_kept_lossily() {
-        let (_, stdout, _) = tails("printf 'a\\xffb\\nafter\\n'; exit 1").await;
+        let stdout = forward(&b"a\xffb\nafter\n"[..], Stream::Stdout).await;
 
         assert_eq!(stdout.body(), "a\u{fffd}b\nafter");
     }

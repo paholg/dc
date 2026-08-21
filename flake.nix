@@ -173,6 +173,7 @@
               pandoc
               rumdl
               vhs
+              watchexec
               # For recording demos:
               bashInteractive
               starship

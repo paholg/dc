@@ -477,9 +477,6 @@ container, performing TLS termination on 443.
 
 If this service runs a web service, put its port here.
 
-All ports other than 80 and 443 are forwarded raw to the service, whether
-this is set or not.
-
 **Type**: `integer`
 
 #### `customizations.devconcurrent.env.<name>` {#customizations-devconcurrent-env}

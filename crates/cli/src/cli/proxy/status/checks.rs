@@ -868,7 +868,7 @@ async fn check_https_app(
 /// With a cert in play the sidecar bounces navigations to https, so a status
 /// that isn't a redirect means the thing that gets people onto https silently
 /// isn't working. Without one there is nowhere to send them, and port 80
-/// splices straight through to the service instead.
+/// proxies straight through to the service instead.
 async fn check_http_app(
     probe: &Probe,
     hostname: &str,
@@ -879,12 +879,14 @@ async fn check_http_app(
     let expect_redirect = matches!(probe.tls, TlsSetup::Ready(_));
 
     let check = match http_status(&mut stream, hostname, RequestKind::Navigation).await {
-        // Port 80 is a byte splice rather than a reverse proxy, so a container
-        // port with nothing on it shows up as the sidecar hanging up mid-request
-        // rather than as a gateway status.
         Err(e) => Check::fail(format!(
             "no HTTP response on port {HTTP_PORT}: {e}; check that container port \
              {container_port} is serving"
+        )),
+        // Both ports are reverse proxies, so a container port with nothing on
+        // it is the sidecar's own gateway status rather than the app's.
+        Ok(status @ (502 | 504)) => Check::fail(format!(
+            "the proxy answered {status}: nothing is serving on container port {container_port}",
         )),
         Ok(status) if expect_redirect && status == navigation::REDIRECT_STATUS => {
             Check::ok_with(status.to_string())
@@ -895,7 +897,7 @@ async fn check_http_app(
              browsers that land on http will stay there",
         )),
         Ok(status) => Check::ok_with(status.to_string())
-            .with_detail("no CA is configured, so port 80 serves the service directly".to_string()),
+            .with_detail("no CA is configured, so port 80 proxies to the service".to_string()),
     };
     // Overwrites this path's own connect result; the https path owns `https`.
     out.update(|c| c.http = Datum::Value(check));

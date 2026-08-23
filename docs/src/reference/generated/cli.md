@@ -298,11 +298,12 @@ Check that every configured hostname and port is reachable
 
 **Usage:** `devconcurrent proxy status [OPTIONS]`
 
+**Command Alias:** `s`
+
 ###### **Options:**
 
 * `-w`, `--workspace <WORKSPACE>` — Workspace name (only useful if its devcontainer.json diverges from the root workspace)
 * `-a`, `--all` — Check every proxy-enabled project, not just this one
-* `-l`, `--live` — Show live, updating data
 * `--json` — Print the results as JSON instead of a table
 
 

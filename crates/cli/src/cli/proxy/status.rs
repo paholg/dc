@@ -33,9 +33,6 @@ mod endpoints;
 /// rather than a timed-out `-`.
 const DEADLINE: Duration = Duration::from_secs(25);
 
-/// How long to wait between passes in `--live`.
-const LIVE_PERIOD: Duration = Duration::from_secs(2);
-
 #[derive(Debug, Args)]
 pub(crate) struct StatusArgs {
     /// Workspace name (only useful if its devcontainer.json diverges from the root workspace)
@@ -45,10 +42,6 @@ pub(crate) struct StatusArgs {
     /// Check every proxy-enabled project, not just this one
     #[arg(short, long)]
     all: bool,
-
-    /// Show live, updating data
-    #[arg(short, long, conflicts_with = "json")]
-    live: bool,
 
     /// Print the results as JSON instead of a table
     #[arg(long)]
@@ -68,11 +61,11 @@ pub(super) async fn run(proxy: &ProxyState, args: &StatusArgs) -> Result<()> {
     let strays = stray_sidecars(&sidecars, &endpoints);
     let probe = Arc::new(Probe::new(proxy.config.port, &proxy.ca_root, sidecars));
 
-    let proxy_checks = spawn_proxy_checks(proxy, strays, args.live);
+    let proxy_checks = spawn_proxy_checks(proxy, strays);
     let rows: Vec<Row> = endpoints
         .into_iter()
         .map(|endpoint| Row {
-            checks: spawn_row(probe.clone(), endpoint.clone(), args.live),
+            checks: spawn_row(probe.clone(), endpoint.clone()),
             endpoint,
         })
         .collect();
@@ -90,7 +83,7 @@ pub(super) async fn run(proxy: &ProxyState, args: &StatusArgs) -> Result<()> {
     let mut report = Report::new()
         .text(format!("PROJECT: {}", title.blue()))
         .text(String::new())
-        .table(proxy_table(&proxy_checks, args.live))
+        .table(proxy_table(&proxy_checks))
         .lines(proxy_notes(&proxy_checks))
         .deadline(DEADLINE);
 
@@ -112,7 +105,7 @@ pub(super) async fn run(proxy: &ProxyState, args: &StatusArgs) -> Result<()> {
             .text(String::new())
             .text(format!("WORKSPACE: {}", heading.yellow()))
             .text(String::new())
-            .table(endpoint_table(&group.rows, args.live))
+            .table(endpoint_table(&group.rows))
             .lines(notes(&group.rows));
     }
 
@@ -273,11 +266,7 @@ impl ProxyChecks {
     }
 }
 
-fn spawn_proxy_checks(
-    proxy: &ProxyState,
-    strays: Vec<String>,
-    live: bool,
-) -> Gatherer<ProxyChecks> {
+fn spawn_proxy_checks(proxy: &ProxyState, strays: Vec<String>) -> Gatherer<ProxyChecks> {
     let docker = proxy.docker.clone();
     let port = proxy.config.port;
     let ca_root = proxy.ca_root.clone();
@@ -291,26 +280,20 @@ fn spawn_proxy_checks(
         .any(|s| s.container_port.is_some());
 
     Gatherer::progressive(move |mut out| async move {
-        loop {
-            checks::run_proxy(
-                &docker,
-                port,
-                &ca_root,
-                &expected_hash,
-                wants_tls,
-                &strays,
-                &mut out,
-            )
-            .await;
-            if !live {
-                return;
-            }
-            tokio::time::sleep(LIVE_PERIOD).await;
-        }
+        checks::run_proxy(
+            &docker,
+            port,
+            &ca_root,
+            &expected_hash,
+            wants_tls,
+            &strays,
+            &mut out,
+        )
+        .await;
     })
 }
 
-fn proxy_table(source: &Gatherer<ProxyChecks>, live: bool) -> Table {
+fn proxy_table(source: &Gatherer<ProxyChecks>) -> Table {
     let status = source.clone();
     let detail = source.clone();
     let columns = [
@@ -336,7 +319,7 @@ fn proxy_table(source: &Gatherer<ProxyChecks>, live: bool) -> Table {
     columns
         .into_iter()
         .collect::<TableBuilder<(&str, PickProxy)>>()
-        .build(&PROXY_ROWS, live)
+        .build(&PROXY_ROWS, false)
 }
 
 /// The notes under the proxy table, on the same terms as a workspace's.
@@ -356,25 +339,19 @@ fn proxy_notes(source: &Gatherer<ProxyChecks>) -> impl Fn(u16) -> Vec<String> + 
 
 // -- one row per service -----------------------------------------------------
 
-fn spawn_row(probe: Arc<Probe>, endpoint: Arc<Endpoint>, live: bool) -> Gatherer<RowChecks> {
+fn spawn_row(probe: Arc<Probe>, endpoint: Arc<Endpoint>) -> Gatherer<RowChecks> {
     Gatherer::progressive(move |mut out| async move {
-        loop {
-            // The stages have their own timeouts; this is only a backstop, so
-            // one wedged row can't hold the whole table open.
-            let _ = tokio::time::timeout(
-                checks::ROW_TIMEOUT,
-                checks::run(&probe, &endpoint, &mut out),
-            )
-            .await;
-            if !live {
-                return;
-            }
-            tokio::time::sleep(LIVE_PERIOD).await;
-        }
+        // The stages have their own timeouts; this is only a backstop, so
+        // one wedged row can't hold the whole table open.
+        let _ = tokio::time::timeout(
+            checks::ROW_TIMEOUT,
+            checks::run(&probe, &endpoint, &mut out),
+        )
+        .await;
     })
 }
 
-fn endpoint_table(rows: &[Row], live: bool) -> Table {
+fn endpoint_table(rows: &[Row]) -> Table {
     /// A column showing one check of the row.
     fn stage(header: &'static str, pick: checks::PickStage) -> ColumnDef<Row> {
         ColumnDef::new(header, Align::Left, move |r: &Row| {
@@ -401,7 +378,7 @@ fn endpoint_table(rows: &[Row], live: bool) -> Table {
     columns
         .into_iter()
         .collect::<TableBuilder<Row>>()
-        .build(rows, live)
+        .build(rows, false)
 }
 
 /// The host ports are always the same pair, so the only thing worth a column

@@ -132,19 +132,18 @@ impl fmt::Display for Check {
 
 /// Every check for one service, in the order they're run and displayed.
 ///
-/// `connect` and `tls` are the https path's prerequisites and `https` is the
-/// status it answered with; `http` asks the same service the same question
-/// over port 80.
+/// `http` is the service's answer over port 80; `connect` and `tls` are the
+/// https path's prerequisites and `https` is the status it answered with.
 #[derive(Debug, Clone, Default, Serialize)]
 pub(super) struct RowChecks {
     pub(super) container: Datum<Check>,
     pub(super) sidecar: Datum<Check>,
     pub(super) dns: Datum<Check>,
     pub(super) resolver: Datum<Check>,
+    pub(super) http: Datum<Check>,
     pub(super) connect: Datum<Check>,
     pub(super) tls: Datum<Check>,
     pub(super) https: Datum<Check>,
-    pub(super) http: Datum<Check>,
 }
 
 /// Reads one check out of a row; how a column or a note knows which stage it's
@@ -158,10 +157,10 @@ pub(super) const STAGES: [(&str, PickStage); 8] = [
     ("SIDECAR", |c| &c.sidecar),
     ("DNS", |c| &c.dns),
     ("RESOLV", |c| &c.resolver),
+    ("HTTP", |c| &c.http),
     ("CONNECT", |c| &c.connect),
     ("TLS", |c| &c.tls),
     ("HTTPS", |c| &c.https),
-    ("HTTP", |c| &c.http),
 ];
 
 impl RowChecks {
@@ -533,18 +532,18 @@ pub(super) async fn run(probe: &Probe, endpoint: &Endpoint, out: &mut Publisher<
     let Some(container_port) = endpoint.container_port else {
         // DNS-only: there's nothing to reach, and that's not a fault.
         out.update(|c| {
+            c.http = Datum::Value(Check::skip());
             c.connect = Datum::Value(Check::skip_because("no containerPort is configured"));
             c.tls = Datum::Value(Check::skip());
             c.https = Datum::Value(Check::skip());
-            c.http = Datum::Value(Check::skip());
         });
         return;
     };
 
     // The two paths are reported independently: https can be broken while http
     // is fine, and saying which is the point of checking both.
+    check_http(&hostname, ip, container_port, out).await;
     check_https(probe, &hostname, ip, container_port, out).await;
-    check_http(probe, &hostname, ip, container_port, out).await;
 }
 
 /// The https path: connect to 443, prove the sidecar's cert, then prove the
@@ -567,9 +566,8 @@ async fn check_https(
     check_https_app(probe, hostname, container_port, stream, out).await;
 }
 
-/// The http path: connect to 80 and see what a browser landing there would get.
+/// The http path: connect to 80 and see what the service answers.
 async fn check_http(
-    probe: &Probe,
     hostname: &str,
     ip: IpAddr,
     container_port: u16,
@@ -579,7 +577,7 @@ async fn check_http(
     let Some(stream) = connect(addr, |c| &mut c.http, out).await else {
         return;
     };
-    check_http_app(probe, hostname, container_port, stream, out).await;
+    check_http_app(hostname, container_port, stream, out).await;
 }
 
 /// Mark everything that wasn't reached, so no cell is left spinning.
@@ -589,10 +587,10 @@ fn skip_rest(out: &mut Publisher<RowChecks>, reason: Check) {
             &mut c.sidecar,
             &mut c.dns,
             &mut c.resolver,
+            &mut c.http,
             &mut c.connect,
             &mut c.tls,
             &mut c.https,
-            &mut c.http,
         ] {
             if matches!(slot, Datum::Pending) {
                 *slot = Datum::Value(reason.clone());
@@ -849,7 +847,7 @@ async fn check_https_app(
         }
     };
 
-    let check = match http_status(&mut stream, hostname, RequestKind::Api).await {
+    let check = match http_status(&mut stream, hostname).await {
         Err(e) => Check::fail(format!("no HTTP response over TLS: {e}")),
         // The sidecar's reverse proxy answers these when nothing is listening
         // on the container port, so it's the app that's missing, not the proxy.
@@ -862,23 +860,16 @@ async fn check_https_app(
     out.update(|c| c.https = Datum::Value(check));
 }
 
-/// What port 80 should do with a browser navigation, which is what this check
-/// sends it.
-///
-/// With a cert in play the sidecar bounces navigations to https, so a status
-/// that isn't a redirect means the thing that gets people onto https silently
-/// isn't working. Without one there is nowhere to send them, and port 80
-/// proxies straight through to the service instead.
+/// The service's own answer over port 80. The sidecar only redirects browser
+/// navigations to https; this asks the way a script would, which proxies
+/// straight through, so what comes back is the app's.
 async fn check_http_app(
-    probe: &Probe,
     hostname: &str,
     container_port: u16,
     mut stream: TcpStream,
     out: &mut Publisher<RowChecks>,
 ) {
-    let expect_redirect = matches!(probe.tls, TlsSetup::Ready(_));
-
-    let check = match http_status(&mut stream, hostname, RequestKind::Navigation).await {
+    let check = match http_status(&mut stream, hostname).await {
         Err(e) => Check::fail(format!(
             "no HTTP response on port {HTTP_PORT}: {e}; check that container port \
              {container_port} is serving"
@@ -888,16 +879,7 @@ async fn check_http_app(
         Ok(status @ (502 | 504)) => Check::fail(format!(
             "the proxy answered {status}: nothing is serving on container port {container_port}",
         )),
-        Ok(status) if expect_redirect && status == navigation::REDIRECT_STATUS => {
-            Check::ok_with(status.to_string())
-                .with_detail(format!("redirects to https://{hostname}"))
-        }
-        Ok(status) if expect_redirect => Check::fail(format!(
-            "port {HTTP_PORT} answered {status} instead of redirecting to https; \
-             browsers that land on http will stay there",
-        )),
-        Ok(status) => Check::ok_with(status.to_string())
-            .with_detail("no CA is configured, so port 80 proxies to the service".to_string()),
+        Ok(status) => Check::ok_with(status.to_string()),
     };
     // Overwrites this path's own connect result; the https path owns `https`.
     out.update(|c| c.http = Datum::Value(check));
@@ -926,35 +908,13 @@ fn describe_handshake_error(error: &std::io::Error, hostname: &str) -> String {
 }
 
 /// Send the smallest request that gets a status line back, and read only that.
-/// Whether to ask as a browser following a link would, or as a script would.
-/// Port 80 only redirects the former, so the distinction decides what comes
-/// back.
-#[derive(Clone, Copy)]
-enum RequestKind {
-    Api,
-    Navigation,
-}
-
-async fn http_status<S: AsyncRead + AsyncWrite + Unpin>(
-    stream: &mut S,
-    host: &str,
-    kind: RequestKind,
-) -> Result<u16> {
-    // Built from the same constants the sidecar matches on, so this really
-    // does take the path it is meant to be testing.
-    let accept = match kind {
-        RequestKind::Api => format!("{}: */*\r\n", navigation::ACCEPT_HEADER),
-        RequestKind::Navigation => format!(
-            "{}: {}\r\n{}: {}\r\n",
-            navigation::ACCEPT_HEADER,
-            navigation::ACCEPT,
-            navigation::MODE_HEADER,
-            navigation::MODE,
-        ),
-    };
+/// Asks as a script would, not as a browser navigation, so port 80 proxies it
+/// through to the service instead of redirecting it to https.
+async fn http_status<S: AsyncRead + AsyncWrite + Unpin>(stream: &mut S, host: &str) -> Result<u16> {
     let request = format!(
-        "GET / HTTP/1.1\r\nHost: {host}\r\nUser-Agent: devconcurrent\r\n{accept}\
-         Connection: close\r\n\r\n",
+        "GET / HTTP/1.1\r\nHost: {host}\r\nUser-Agent: devconcurrent\r\n\
+         {}: */*\r\nConnection: close\r\n\r\n",
+        navigation::ACCEPT_HEADER,
     );
 
     tokio::time::timeout(HTTP_TIMEOUT, async {

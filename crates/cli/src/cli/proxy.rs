@@ -50,6 +50,7 @@ enum ProxyCommands {
     /// Stop and remove the proxy
     Down,
     /// Check that every configured hostname and port is reachable
+    #[command(visible_alias = "s")]
     Status(status::StatusArgs),
 }
 

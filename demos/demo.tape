@@ -1,23 +1,41 @@
 Output docs/src/demos/demo.gif
 Source demos/lib/setup.tape
 
+Ctrl+V
+Ctrl+J
+
 Type "# This is an example project, dcex"
-Enter
+Ctrl+V
+Ctrl+J
 Sleep 0.4s
 
+
 Type "# It has a simple python server and a SQL database"
-Enter
+Ctrl+V
+Ctrl+J
 Sleep 0.4s
 
 Type "# Just by being here, we have some env vars set"
-Enter
 Enter
 Sleep 0.4s
 
 Type "echo $APP_URL"
 Enter
+Sleep 0.4s
+
+Type "# Which we can use to access the server"
+Enter
+Sleep 0.4s
+
+Type "curl $APP_URL/hello"
+Enter
 Wait
-Sleep 0.6s
+Sleep 0.4s
+
+Type "curl $APP_URL/hello"
+Enter
+Wait
+Sleep 0.4s
 
 Type "# Let's start a new workspace"
 Enter
@@ -28,7 +46,7 @@ Type "dc up -g fun-feature"
 Sleep 0.8s
 Enter
 Wait
-Sleep 1.0s
+Sleep 1.2s
 
 Ctrl+L
 
@@ -43,6 +61,11 @@ Sleep 0.6s
 
 Type "# We can work here, using URLs"
 Enter
+Sleep 0.4s
+
+Type "curl $APP_URL/hello"
+Enter
+Wait
 Sleep 0.4s
 
 Type "# And never worry about port conflicts"
@@ -62,13 +85,18 @@ Type "# Look ma, we're containerized!"
 Enter
 Sleep 0.4s
 
+Type "curl http://localhost:8080/hello"
+Enter
+Wait /➜/
+Sleep 0.4s
+
 Ctrl+D
 Wait
 Sleep 0.4s
 
 Type "# And we can toss the whole thing once done"
 Enter
-Sleep 0.4s
+Sleep 0.8s
 
 Type "dc destroy"
 Enter

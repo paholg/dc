@@ -10,7 +10,7 @@ run *args:
 
 # Serve the book locally, rebuilding on change
 [parallel]
-book: watch-gen watch-book
+book: watch-gen watch-book watch-readme
 
 [continue, private]
 watch-book:
@@ -20,6 +20,10 @@ watch-book:
 [continue, private]
 watch-gen:
     watchexec --watch crates --watch docs/snippets --exts rs,md -- just gen
+
+[continue, private]
+watch-readme:
+    gh-markdown-preview README.md
 
 # Build the proxy image, tag it, then run it.
 proxy-up:

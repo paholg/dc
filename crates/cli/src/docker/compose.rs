@@ -395,9 +395,11 @@ pub(crate) async fn ensure_project_unclaimed(
             &workspace.path,
         ) {
             return Err(eyre!(
-                "The compose project '{project_name}' already belongs to {claim}\n\n\
-                 Two workspaces even of different projects cannot share a name, as the devcontainer
-                 convention uses the worktree folder name only."
+                "\
+The compose project '{project_name}' already belongs to {claim}.
+
+Two workspaces cannot share a name, even across projects. The decontainer convention uses the
+workspace directory name only."
             ));
         }
     }

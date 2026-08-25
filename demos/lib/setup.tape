@@ -11,7 +11,7 @@ Set FontSize 24
 Set Width 1200
 Set Height 650
 Set Padding 20
-Set TypingSpeed 30ms
+Set TypingSpeed 40ms
 
 # Replace VHS's shell with one configured for recording: `dc`, completions, a
 # short prompt, the demo config, and the example project as the working

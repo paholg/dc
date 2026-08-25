@@ -5,7 +5,12 @@ exclude = [
   "docs/src/reference/generated",
   # Fragments spliced into generated pages; not standalone documents:
   "docs/snippets",
+  # TODO: Maybe there's a mdbook mode for these?
+  "docs/src/SUMMARY.md"
 ]
 
 [MD013]
 code_blocks = false
+
+[MD033]
+allowed = ["p", "a", "img"]

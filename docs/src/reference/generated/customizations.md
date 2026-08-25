@@ -5,10 +5,10 @@
 - [`proxy`](#proxy) — Configure DNS hostnames and HTTP proxy.
   - [`proxy.enable`](#proxy-enable) — Enable the devconcurrent DNS and HTTP proxy for this project.
   - [`proxy.hostname`](#proxy-hostname) — Handlebars template for the proxied hostname, used by every service that does not set its own.
-  - [`proxy.services.<name>`](#proxy-services) — Configure proxy settings for each docker compose service.
-    - [`proxy.services.<name>.hostname`](#proxy-services-hostname) — Handlebars template for this service's hostname.
-    - [`proxy.services.<name>.containerPort`](#proxy-services-containerport) — If set, devconcurrent will run an HTTP proxy on ports 80 and 443 to this port in your container, performing TLS termination on 443.
-- [`env.<name>`](#env) — Define shell variables
+  - [`proxy.services.<name>`](#proxy-services-name) — Configure proxy settings for each docker compose service.
+    - [`proxy.services.<name>.hostname`](#proxy-services-name-hostname) — Handlebars template for this service's hostname.
+    - [`proxy.services.<name>.containerPort`](#proxy-services-name-containerport) — If set, devconcurrent will run an HTTP proxy on ports 80 and 443 to this port in your container, performing TLS termination on 443.
+- [`env.<name>`](#env-name) — Define shell variables
 
 ## `worktreeFolder` {#worktreefolder}
 
@@ -57,20 +57,20 @@ Available variables:
 
 **Default**: `"{{workspace}}.{{service}}.test"`
 
-### `proxy.services.<name>` {#proxy-services}
+### `proxy.services.<name>` {#proxy-services-name}
 
 Configure proxy settings for each docker compose service.
 
 **Type**: `object`
 
-#### `proxy.services.<name>.hostname` {#proxy-services-hostname}
+#### `proxy.services.<name>.hostname` {#proxy-services-name-hostname}
 
 Handlebars template for this service's hostname. Overrides the
 project-level `hostname`.
 
 **Type**: `string`
 
-#### `proxy.services.<name>.containerPort` {#proxy-services-containerport}
+#### `proxy.services.<name>.containerPort` {#proxy-services-name-containerport}
 
 If set, devconcurrent will run an HTTP proxy on ports 80 and 443 to this port in your
 container, performing TLS termination on 443.
@@ -79,7 +79,7 @@ If this service runs a web service, put its port here.
 
 **Type**: `integer`
 
-## `env.<name>` {#env}
+## `env.<name>` {#env-name}
 
 Define shell variables
 

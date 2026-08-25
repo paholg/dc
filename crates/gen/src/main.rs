@@ -248,16 +248,7 @@ fn collect(
 
         // A map with arbitrary keys, like `projects` or `services`: document
         // it as `name.<name>` and descend into the value's schema.
-        let pattern_value = resolved
-            .get("patternProperties")
-            .and_then(Value::as_object)
-            .and_then(|p| p.values().next())
-            .or_else(|| {
-                resolved
-                    .get("additionalProperties")
-                    .filter(|v| v.is_object())
-            });
-        let (display_name, target, ref_name) = match pattern_value {
+        let (display_name, target, ref_name) = match map_value(resolved) {
             Some(value) => {
                 let (target, ref_name) = resolve(value, defs);
                 (format!("{name}.<name>"), target, ref_name)
@@ -270,85 +261,159 @@ fn collect(
         } else {
             format!("{prefix}.{display_name}")
         };
-        let id = display
-            .split('.')
-            .filter(|s| *s != "<name>")
-            .map(|s| {
-                s.chars()
-                    .filter(char::is_ascii_alphanumeric)
-                    .collect::<String>()
-                    .to_lowercase()
-            })
-            .collect::<Vec<_>>()
-            .join("-");
-
-        let description = prop
-            .get("description")
-            .or_else(|| target.get("description"))
-            .and_then(Value::as_str)
-            .unwrap_or_default();
-
-        let mut body = String::new();
-        if !description.is_empty() {
-            body.push_str(description.trim_end());
-            body.push_str("\n\n");
-        }
-
-        body.push_str(&format!(
-            "**Type**: `{}`\n\n",
-            type_of(target, defs, format)
-        ));
-        if let Some(values) = enum_values(target) {
-            body.push_str(&values_block(&values, format)?);
-        }
-        if required.contains(&name.as_str()) {
-            body.push_str("**Required**: yes\n\n");
-        }
-        if let Some(default) = prop.get("default").or_else(|| target.get("default"))
-            && !default.is_null()
-            && !default.is_object()
-        {
-            body.push_str(&format!("**Default**: `{}`\n\n", scalar(default, format)?));
-        }
-
-        let snippet_path = snippets.join(format!("{display}.md"));
-        if snippet_path.is_file() {
-            used_snippets.insert(snippet_path.clone());
-            let snippet = fs::read_to_string(&snippet_path)?;
-            body.push_str(snippet.trim_end());
-            body.push_str("\n\n");
-        } else if let Some(examples) = prop
-            .get("examples")
-            .or_else(|| target.get("examples"))
-            .and_then(Value::as_array)
-        {
-            for example in examples {
-                body.push_str(&example_block(example, format)?);
-            }
-        }
-
-        // Trim the trailing blank line; `render` re-separates sections.
-        body.truncate(body.trim_end().len());
-        body.push('\n');
-
-        let summary = first_sentence(description);
-        entries.push(Entry {
-            display: display.clone(),
-            id,
+        document(
+            entries,
+            prop,
+            target,
+            ref_name,
+            &display,
             depth,
-            summary,
-            body,
-        });
+            required.contains(&name.as_str()),
+            defs,
+            format,
+            snippets,
+            used_snippets,
+        )?;
+    }
+    Ok(())
+}
 
-        // The devcontainer schema is documented by its own spec; don't inline
-        // its hundreds of options here.
-        if ref_name != Some("DevcontainerConfig") {
+/// Document a single option: emit its entry, then descend into any inner
+/// formats (struct fields, array element structs, map values).
+#[expect(clippy::too_many_arguments)]
+fn document(
+    entries: &mut Vec<Entry>,
+    prop: &Value,
+    target: &Value,
+    ref_name: Option<&str>,
+    display: &str,
+    depth: usize,
+    required: bool,
+    defs: &Value,
+    format: Format,
+    snippets: &Path,
+    used_snippets: &mut BTreeSet<PathBuf>,
+) -> eyre::Result<()> {
+    let id = display
+        .split('.')
+        .map(|s| {
+            s.chars()
+                .filter(char::is_ascii_alphanumeric)
+                .collect::<String>()
+                .to_lowercase()
+        })
+        .collect::<Vec<_>>()
+        .join("-");
+
+    let description = prop
+        .get("description")
+        .or_else(|| target.get("description"))
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+
+    let mut body = String::new();
+    if !description.is_empty() {
+        body.push_str(description.trim_end());
+        body.push_str("\n\n");
+    }
+
+    body.push_str(&format!(
+        "**Type**: `{}`\n\n",
+        type_of(target, defs, format)
+    ));
+    if let Some(values) = enum_values(target) {
+        body.push_str(&values_block(&values, format)?);
+    }
+    if required {
+        body.push_str("**Required**: yes\n\n");
+    }
+    if let Some(default) = prop.get("default").or_else(|| target.get("default"))
+        && !default.is_null()
+        && !default.is_object()
+    {
+        body.push_str(&format!("**Default**: `{}`\n\n", scalar(default, format)?));
+    }
+
+    let snippet_path = snippets.join(format!("{display}.md"));
+    if snippet_path.is_file() {
+        used_snippets.insert(snippet_path.clone());
+        let snippet = fs::read_to_string(&snippet_path)?;
+        body.push_str(snippet.trim_end());
+        body.push_str("\n\n");
+    } else if let Some(examples) = prop
+        .get("examples")
+        .or_else(|| target.get("examples"))
+        .and_then(Value::as_array)
+    {
+        for example in examples {
+            body.push_str(&example_block(example, format)?);
+        }
+    }
+
+    // Trim the trailing blank line; `render` re-separates sections.
+    body.truncate(body.trim_end().len());
+    body.push('\n');
+
+    let summary = first_sentence(description);
+    entries.push(Entry {
+        display: display.to_string(),
+        id,
+        depth,
+        summary,
+        body,
+    });
+
+    // The devcontainer schema is documented by its own spec; don't inline
+    // its hundreds of options here.
+    if ref_name == Some("DevcontainerConfig") {
+        return Ok(());
+    }
+    collect(
+        entries,
+        target,
+        defs,
+        display,
+        depth + 1,
+        format,
+        snippets,
+        used_snippets,
+    )?;
+
+    // Inner formats hidden behind `array` or `object` in the type line, in
+    // the schema itself or any of its union variants: document array element
+    // structs as `name[].field` and map values as `name.<name>`.
+    let mut variants = Vec::new();
+    union_variants(target, defs, &mut variants);
+    for variant in variants {
+        if is_array(variant)
+            && let Some((items, item_ref)) = variant.get("items").map(|i| resolve(i, defs))
+            && item_ref != Some("DevcontainerConfig")
+            && let Some(element) = object_variant(items, defs)
+        {
             collect(
                 entries,
-                target,
+                element,
                 defs,
-                &display,
+                &format!("{display}[]"),
                 depth + 1,
+                format,
+                snippets,
+                used_snippets,
+            )?;
+        }
+        // A map-typed option itself is unwrapped to `name.<name>` by
+        // `collect`, so a map here is a union variant or a nested map value.
+        if let Some(value) = map_value(variant) {
+            let (value_target, value_ref) = resolve(value, defs);
+            document(
+                entries,
+                value,
+                value_target,
+                value_ref,
+                &format!("{display}.<name>"),
+                depth + 1,
+                false,
+                defs,
                 format,
                 snippets,
                 used_snippets,
@@ -356,6 +421,55 @@ fn collect(
         }
     }
     Ok(())
+}
+
+/// The value schema of a map with arbitrary keys, if `node` is one.
+fn map_value(node: &Value) -> Option<&Value> {
+    node.get("patternProperties")
+        .and_then(Value::as_object)
+        .and_then(|p| p.values().next())
+        .or_else(|| node.get("additionalProperties").filter(|v| v.is_object()))
+}
+
+/// Flatten a (possibly nested) union into its leaf variant schemas. A
+/// non-union schema is its own single leaf.
+fn union_variants<'a>(node: &'a Value, defs: &'a Value, out: &mut Vec<&'a Value>) {
+    match node
+        .get("anyOf")
+        .or_else(|| node.get("oneOf"))
+        .and_then(Value::as_array)
+    {
+        Some(variants) => {
+            for variant in variants {
+                union_variants(resolve(variant, defs).0, defs, out);
+            }
+        }
+        None => out.push(node),
+    }
+}
+
+/// Whether a schema's `type` is or includes `array`.
+fn is_array(node: &Value) -> bool {
+    match node.get("type") {
+        Some(Value::String(s)) => s == "array",
+        Some(Value::Array(a)) => a.iter().any(|v| v.as_str() == Some("array")),
+        _ => false,
+    }
+}
+
+/// The schema itself if it describes a struct, or the first struct variant of
+/// a union like `string | Mount`.
+fn object_variant<'a>(node: &'a Value, defs: &'a Value) -> Option<&'a Value> {
+    if node.get("properties").is_some() {
+        return Some(node);
+    }
+    node.get("anyOf")
+        .or_else(|| node.get("oneOf"))
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .map(|variant| resolve(variant, defs).0)
+        .find(|variant| variant.get("properties").is_some())
 }
 
 /// The allowed values of an enum-like schema: a plain `enum` list, or the
@@ -478,15 +592,24 @@ fn resolve<'a>(node: &'a Value, defs: &'a Value) -> (&'a Value, Option<&'a str>)
 }
 
 fn type_of(node: &Value, defs: &Value, format: Format) -> String {
+    let types = type_parts(node, defs, format);
+    if types.is_empty() {
+        "value".to_string()
+    } else {
+        types.join(" | ")
+    }
+}
+
+/// The types a schema allows, one entry per union variant, dropping nulls and
+/// duplicates.
+fn type_parts(node: &Value, defs: &Value, format: Format) -> Vec<String> {
     let map_type = match format {
         Format::Toml => "table",
         Format::Json => "object",
     };
     if node.get("properties").is_some() || node.get("patternProperties").is_some() {
-        return map_type.to_string();
+        return vec![map_type.to_string()];
     }
-    // A union like `string | array`: name each variant's type, dropping nulls
-    // and duplicates.
     if let Some(any) = node
         .get("anyOf")
         .or_else(|| node.get("oneOf"))
@@ -498,25 +621,44 @@ fn type_of(node: &Value, defs: &Value, format: Format) -> String {
                 continue;
             }
             let (resolved, _) = resolve(variant, defs);
-            for part in type_of(resolved, defs, format).split(" | ") {
-                if !types.iter().any(|t| t == part) {
-                    types.push(part.to_string());
+            for part in type_parts(resolved, defs, format) {
+                if !types.contains(&part) {
+                    types.push(part);
                 }
             }
         }
         if !types.is_empty() {
-            return types.join(" | ");
+            return types;
         }
     }
     match node.get("type") {
-        Some(Value::String(s)) if s == "object" => map_type.to_string(),
-        Some(Value::String(s)) => s.clone(),
+        Some(Value::String(s)) if s == "object" => vec![map_type.to_string()],
+        Some(Value::String(s)) if s == "array" => vec![array_of(node, defs, format)],
+        Some(Value::String(s)) => vec![s.clone()],
         Some(Value::Array(a)) => a
             .iter()
             .filter_map(Value::as_str)
             .filter(|s| *s != "null")
-            .collect::<Vec<_>>()
-            .join(" | "),
-        _ => "value".to_string(),
+            .map(|s| match s {
+                "array" => array_of(node, defs, format),
+                "object" => map_type.to_string(),
+                other => other.to_string(),
+            })
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+/// An array schema's type, naming its element type: `array<string>`.
+fn array_of(node: &Value, defs: &Value, format: Format) -> String {
+    let Some(items) = node.get("items") else {
+        return "array".to_string();
+    };
+    let (items, _) = resolve(items, defs);
+    let parts = type_parts(items, defs, format);
+    if parts.is_empty() {
+        "array".to_string()
+    } else {
+        format!("array<{}>", parts.join(" | "))
     }
 }

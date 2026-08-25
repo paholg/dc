@@ -12,12 +12,12 @@
 - [`overrideFeatureInstallOrder`](#overridefeatureinstallorder) — Array consisting of the Feature id (without the semantic version) of Features in the order the user wants them to be installed.
 - [`secrets`](#secrets) — Recommended secrets for this dev container.
 - [`forwardPorts`](#forwardports) — Ports that can be forwarded from the host to the container.
-- [`portsAttributes.<name>`](#portsattributes) — Settings to apply to forwardPorts.
-  - [`portsAttributes.<name>.onAutoForward`](#portsattributes-onautoforward)
-  - [`portsAttributes.<name>.elevateIfNeeded`](#portsattributes-elevateifneeded)
-  - [`portsAttributes.<name>.label`](#portsattributes-label)
-  - [`portsAttributes.<name>.protocol`](#portsattributes-protocol)
-  - [`portsAttributes.<name>.requireLocalPort`](#portsattributes-requirelocalport)
+- [`portsAttributes.<name>`](#portsattributes-name) — Settings to apply to forwardPorts.
+  - [`portsAttributes.<name>.onAutoForward`](#portsattributes-name-onautoforward)
+  - [`portsAttributes.<name>.elevateIfNeeded`](#portsattributes-name-elevateifneeded)
+  - [`portsAttributes.<name>.label`](#portsattributes-name-label)
+  - [`portsAttributes.<name>.protocol`](#portsattributes-name-protocol)
+  - [`portsAttributes.<name>.requireLocalPort`](#portsattributes-name-requirelocalport)
 - [`otherPortsAttributes`](#otherportsattributes) — Default settings for forwardPorts.
   - [`otherPortsAttributes.onAutoForward`](#otherportsattributes-onautoforward)
   - [`otherPortsAttributes.elevateIfNeeded`](#otherportsattributes-elevateifneeded)
@@ -25,21 +25,30 @@
   - [`otherPortsAttributes.protocol`](#otherportsattributes-protocol)
   - [`otherPortsAttributes.requireLocalPort`](#otherportsattributes-requirelocalport)
 - [`updateRemoteUserUID`](#updateremoteuseruid) — Controls whether on Linux the container's user should be updated with the local user's UID and GID.
-- [`containerEnv.<name>`](#containerenv) — Container environment variables.
+- [`containerEnv.<name>`](#containerenv-name) — Container environment variables.
 - [`containerUser`](#containeruser) — The user the container will be started with.
 - [`mounts`](#mounts) — Mounts to setup on container create.
+  - [`mounts[].type`](#mounts-type)
+  - [`mounts[].source`](#mounts-source) — A string that may contain `${...}` variable substitutions.
+  - [`mounts[].target`](#mounts-target) — A string that may contain `${...}` variable substitutions.
 - [`init`](#init) — Passes the --init flag when creating the dev container.
 - [`privileged`](#privileged) — Passes the --privileged flag when creating the dev container.
 - [`capAdd`](#capadd) — Passes docker capabilities to include when creating the dev container.
 - [`securityOpt`](#securityopt) — Passes docker security options to include when creating the dev container.
-- [`remoteEnv.<name>`](#remoteenv) — Remote environment variables to set for processes spawned in the container including lifecycle scripts and any remote editor/IDE server process.
+- [`remoteEnv.<name>`](#remoteenv-name) — Remote environment variables to set for processes spawned in the container including lifecycle scripts and any remote editor/IDE server process.
 - [`remoteUser`](#remoteuser) — The username to use for spawning processes in the container including lifecycle scripts and any remote editor/IDE server process.
 - [`initializeCommand`](#initializecommand) — A command to run locally (i.e Your host machine, cloud VM) before anything else.
+  - [`initializeCommand.<name>`](#initializecommand-name) — A command as written in config, before `${...}` substitution.
 - [`onCreateCommand`](#oncreatecommand) — A command to run when creating the container.
+  - [`onCreateCommand.<name>`](#oncreatecommand-name) — A command as written in config, before `${...}` substitution.
 - [`updateContentCommand`](#updatecontentcommand) — A command to run when creating the container and rerun when the workspace content was updated while creating the container.
+  - [`updateContentCommand.<name>`](#updatecontentcommand-name) — A command as written in config, before `${...}` substitution.
 - [`postCreateCommand`](#postcreatecommand) — A command to run after creating the container.
+  - [`postCreateCommand.<name>`](#postcreatecommand-name) — A command as written in config, before `${...}` substitution.
 - [`postStartCommand`](#poststartcommand) — A command to run after starting the container.
+  - [`postStartCommand.<name>`](#poststartcommand-name) — A command as written in config, before `${...}` substitution.
 - [`postAttachCommand`](#postattachcommand) — A command to run when attaching to the container.
+  - [`postAttachCommand.<name>`](#postattachcommand-name) — A command as written in config, before `${...}` substitution.
 - [`waitFor`](#waitfor) — The user command to wait for before continuing execution in the background while the UI is starting up.
 - [`userEnvProbe`](#userenvprobe) — User environment probe to run.
 - [`hostRequirements`](#hostrequirements) — Host hardware requirements.
@@ -54,16 +63,16 @@
     - [`customizations.devconcurrent.proxy`](#customizations-devconcurrent-proxy) — Configure DNS hostnames and HTTP proxy.
       - [`customizations.devconcurrent.proxy.enable`](#customizations-devconcurrent-proxy-enable) — Enable the devconcurrent DNS and HTTP proxy for this project.
       - [`customizations.devconcurrent.proxy.hostname`](#customizations-devconcurrent-proxy-hostname) — Handlebars template for the proxied hostname, used by every service that does not set its own.
-      - [`customizations.devconcurrent.proxy.services.<name>`](#customizations-devconcurrent-proxy-services) — Configure proxy settings for each docker compose service.
-        - [`customizations.devconcurrent.proxy.services.<name>.hostname`](#customizations-devconcurrent-proxy-services-hostname) — Handlebars template for this service's hostname.
-        - [`customizations.devconcurrent.proxy.services.<name>.containerPort`](#customizations-devconcurrent-proxy-services-containerport) — If set, devconcurrent will run an HTTP proxy on ports 80 and 443 to this port in your container, performing TLS termination on 443.
-    - [`customizations.devconcurrent.env.<name>`](#customizations-devconcurrent-env) — Define shell variables
+      - [`customizations.devconcurrent.proxy.services.<name>`](#customizations-devconcurrent-proxy-services-name) — Configure proxy settings for each docker compose service.
+        - [`customizations.devconcurrent.proxy.services.<name>.hostname`](#customizations-devconcurrent-proxy-services-name-hostname) — Handlebars template for this service's hostname.
+        - [`customizations.devconcurrent.proxy.services.<name>.containerPort`](#customizations-devconcurrent-proxy-services-name-containerport) — If set, devconcurrent will run an HTTP proxy on ports 80 and 443 to this port in your container, performing TLS termination on 443.
+    - [`customizations.devconcurrent.env.<name>`](#customizations-devconcurrent-env-name) — Define shell variables
 
 ## `dockerComposeFile` {#dockercomposefile}
 
 The name of the docker-compose file(s) used to start the services.
 
-**Type**: `string | array`
+**Type**: `string | array<string>`
 
 **Default**: `[]`
 
@@ -78,7 +87,7 @@ environment which your editor will connect to.
 
 An array of services that should be started and stopped.
 
-**Type**: `array`
+**Type**: `array<string>`
 
 ## `workspaceFolder` {#workspacefolder}
 
@@ -129,7 +138,7 @@ Features to add to the dev container. Ignored by devconcurrent.
 Array consisting of the Feature id (without the semantic version) of Features in the order
 the user wants them to be installed. Ignored by devconcurrent.
 
-**Type**: `array`
+**Type**: `array<string>`
 
 **Default**: `[]`
 
@@ -143,17 +152,17 @@ Recommended secrets for this dev container. Ignored by devconcurrent.
 
 Ports that can be forwarded from the host to the container.
 
-**Type**: `array`
+**Type**: `array<integer | string>`
 
 **Default**: `[]`
 
-## `portsAttributes.<name>` {#portsattributes}
+## `portsAttributes.<name>` {#portsattributes-name}
 
 Settings to apply to forwardPorts. Ignored by devconcurrent.
 
 **Type**: `object`
 
-### `portsAttributes.<name>.onAutoForward` {#portsattributes-onautoforward}
+### `portsAttributes.<name>.onAutoForward` {#portsattributes-name-onautoforward}
 
 **Type**: `string`
 
@@ -161,19 +170,19 @@ Settings to apply to forwardPorts. Ignored by devconcurrent.
 
 **Default**: `"notify"`
 
-### `portsAttributes.<name>.elevateIfNeeded` {#portsattributes-elevateifneeded}
+### `portsAttributes.<name>.elevateIfNeeded` {#portsattributes-name-elevateifneeded}
 
 **Type**: `boolean`
 
 **Default**: `false`
 
-### `portsAttributes.<name>.label` {#portsattributes-label}
+### `portsAttributes.<name>.label` {#portsattributes-name-label}
 
 **Type**: `string`
 
 **Default**: `"Application"`
 
-### `portsAttributes.<name>.protocol` {#portsattributes-protocol}
+### `portsAttributes.<name>.protocol` {#portsattributes-name-protocol}
 
 **Type**: `string`
 
@@ -181,7 +190,7 @@ Settings to apply to forwardPorts. Ignored by devconcurrent.
 
 **Default**: `"http"`
 
-### `portsAttributes.<name>.requireLocalPort` {#portsattributes-requirelocalport}
+### `portsAttributes.<name>.requireLocalPort` {#portsattributes-name-requirelocalport}
 
 **Type**: `boolean`
 
@@ -234,7 +243,7 @@ and GID. On by default when opening from a local folder.
 
 **Type**: `boolean`
 
-## `containerEnv.<name>` {#containerenv}
+## `containerEnv.<name>` {#containerenv-name}
 
 Container environment variables.
 
@@ -250,9 +259,36 @@ The user the container will be started with. The default is the user on the Dock
 
 Mounts to setup on container create.
 
-**Type**: `array`
+**Type**: `array<string | object>`
 
 **Default**: `[]`
+
+### `mounts[].type` {#mounts-type}
+
+**Type**: `string`
+
+**Values**:
+
+- `"bind"` — A bind mount from the host filesystem.
+- `"volume"` — A named Docker volume.
+
+**Required**: yes
+
+### `mounts[].source` {#mounts-source}
+
+A string that may contain `${...}` variable substitutions. Supported variables: `${localEnv:VAR[:default]}` (alias `${env:VAR[:default]}`), `${containerEnv:VAR[:default]}`, `${localWorkspaceFolder}`, `${containerWorkspaceFolder}`, `${localWorkspaceFolderBasename}`, `${containerWorkspaceFolderBasename}`, `${devcontainerId}`.
+https://containers.dev/implementors/json_reference/#variables-in-devcontainerjson
+
+**Type**: `string`
+
+### `mounts[].target` {#mounts-target}
+
+A string that may contain `${...}` variable substitutions. Supported variables: `${localEnv:VAR[:default]}` (alias `${env:VAR[:default]}`), `${containerEnv:VAR[:default]}`, `${localWorkspaceFolder}`, `${containerWorkspaceFolder}`, `${localWorkspaceFolderBasename}`, `${containerWorkspaceFolderBasename}`, `${devcontainerId}`.
+https://containers.dev/implementors/json_reference/#variables-in-devcontainerjson
+
+**Type**: `string`
+
+**Required**: yes
 
 ## `init` {#init}
 
@@ -270,7 +306,7 @@ Passes the --privileged flag when creating the dev container.
 
 Passes docker capabilities to include when creating the dev container.
 
-**Type**: `array`
+**Type**: `array<string>`
 
 **Default**: `[]`
 
@@ -278,11 +314,11 @@ Passes docker capabilities to include when creating the dev container.
 
 Passes docker security options to include when creating the dev container.
 
-**Type**: `array`
+**Type**: `array<string>`
 
 **Default**: `[]`
 
-## `remoteEnv.<name>` {#remoteenv}
+## `remoteEnv.<name>` {#remoteenv-name}
 
 Remote environment variables to set for processes spawned in the
 container including lifecycle scripts and any remote editor/IDE server
@@ -303,14 +339,26 @@ is the same user as the container.
 A command to run locally (i.e Your host machine, cloud VM) before anything else. This
 command is run before "onCreateCommand".
 
-**Type**: `string | array | object`
+**Type**: `string | array<string> | object`
+
+### `initializeCommand.<name>` {#initializecommand-name}
+
+A command as written in config, before `${...}` substitution.
+
+**Type**: `string | array<string>`
 
 ## `onCreateCommand` {#oncreatecommand}
 
 A command to run when creating the container. This command is run after "initializeCommand"
 and before "updateContentCommand".
 
-**Type**: `string | array | object`
+**Type**: `string | array<string> | object`
+
+### `onCreateCommand.<name>` {#oncreatecommand-name}
+
+A command as written in config, before `${...}` substitution.
+
+**Type**: `string | array<string>`
 
 ## `updateContentCommand` {#updatecontentcommand}
 
@@ -318,28 +366,52 @@ A command to run when creating the container and rerun when the workspace conten
 updated while creating the container. This command is run after "onCreateCommand" and before
 "postCreateCommand".
 
-**Type**: `string | array | object`
+**Type**: `string | array<string> | object`
+
+### `updateContentCommand.<name>` {#updatecontentcommand-name}
+
+A command as written in config, before `${...}` substitution.
+
+**Type**: `string | array<string>`
 
 ## `postCreateCommand` {#postcreatecommand}
 
 A command to run after creating the container. This command is run after
 "updateContentCommand" and before "postStartCommand".
 
-**Type**: `string | array | object`
+**Type**: `string | array<string> | object`
+
+### `postCreateCommand.<name>` {#postcreatecommand-name}
+
+A command as written in config, before `${...}` substitution.
+
+**Type**: `string | array<string>`
 
 ## `postStartCommand` {#poststartcommand}
 
 A command to run after starting the container. This command is run after "postCreateCommand"
 and before "postAttachCommand".
 
-**Type**: `string | array | object`
+**Type**: `string | array<string> | object`
+
+### `postStartCommand.<name>` {#poststartcommand-name}
+
+A command as written in config, before `${...}` substitution.
+
+**Type**: `string | array<string>`
 
 ## `postAttachCommand` {#postattachcommand}
 
 A command to run when attaching to the container. This command is run after
 "postStartCommand".
 
-**Type**: `string | array | object`
+**Type**: `string | array<string> | object`
+
+### `postAttachCommand.<name>` {#postattachcommand-name}
+
+A command as written in config, before `${...}` substitution.
+
+**Type**: `string | array<string>`
 
 ## `waitFor` {#waitfor}
 
@@ -457,20 +529,20 @@ Available variables:
 
 **Default**: `"{{workspace}}.{{service}}.test"`
 
-##### `customizations.devconcurrent.proxy.services.<name>` {#customizations-devconcurrent-proxy-services}
+##### `customizations.devconcurrent.proxy.services.<name>` {#customizations-devconcurrent-proxy-services-name}
 
 Configure proxy settings for each docker compose service.
 
 **Type**: `object`
 
-###### `customizations.devconcurrent.proxy.services.<name>.hostname` {#customizations-devconcurrent-proxy-services-hostname}
+###### `customizations.devconcurrent.proxy.services.<name>.hostname` {#customizations-devconcurrent-proxy-services-name-hostname}
 
 Handlebars template for this service's hostname. Overrides the
 project-level `hostname`.
 
 **Type**: `string`
 
-###### `customizations.devconcurrent.proxy.services.<name>.containerPort` {#customizations-devconcurrent-proxy-services-containerport}
+###### `customizations.devconcurrent.proxy.services.<name>.containerPort` {#customizations-devconcurrent-proxy-services-name-containerport}
 
 If set, devconcurrent will run an HTTP proxy on ports 80 and 443 to this port in your
 container, performing TLS termination on 443.
@@ -479,7 +551,7 @@ If this service runs a web service, put its port here.
 
 **Type**: `integer`
 
-#### `customizations.devconcurrent.env.<name>` {#customizations-devconcurrent-env}
+#### `customizations.devconcurrent.env.<name>` {#customizations-devconcurrent-env-name}
 
 Define shell variables
 

@@ -8,22 +8,23 @@ fix: _fix check
 run *args:
     cargo run --bin devconcurrent -- {{args}}
 
-# Serve the book locally, rebuilding on change
+# Serve the book locally, rebuilding on change. Pass `--open` to open a browser.
 [parallel]
-book: watch-gen watch-book watch-readme
+book *args: watch-gen (watch-book args) (watch-readme args)
 
 [continue, private]
-watch-book:
-    # mdbook exits 130 on sigint :(
-    trap ':' INT; mdbook serve docs --open || test $? -eq 130
+watch-book *args:
+    # trap: mdbook exits 130 on sigint :(
+    # mdbook also has an `--opem` flag, so we forward it.
+    trap ':' INT; mdbook serve docs {{args}} || test $? -eq 130
 
 [continue, private]
 watch-gen:
     watchexec --watch crates --watch docs/snippets --exts rs,md -- just gen
 
 [continue, private]
-watch-readme:
-    gh-markdown-preview README.md
+watch-readme *args:
+    gh-markdown-preview {{ if args == "--open" { "" } else { "--disable-auto-open" } }} README.md
 
 # Build the proxy image, tag it, then run it.
 proxy-up:

@@ -24,6 +24,8 @@ This document contains the help content for the `devconcurrent` command-line pro
 * [`devconcurrent proxy up`↴](#devconcurrent-proxy-up)
 * [`devconcurrent proxy down`↴](#devconcurrent-proxy-down)
 * [`devconcurrent proxy status`↴](#devconcurrent-proxy-status)
+* [`devconcurrent proxy trust`↴](#devconcurrent-proxy-trust)
+* [`devconcurrent proxy untrust`↴](#devconcurrent-proxy-untrust)
 
 ## `devconcurrent`
 
@@ -225,7 +227,7 @@ Show this workspace's configured shell variables
 
 Print the CA root directory, generating the CA if it isn't there yet
 
-Trust the CA with `CAROOT=$(devconcurrent show ca-root) mkcert -install`.
+Trust the CA with `dc proxy trust`; this command is for importing `rootCA.pem` somewhere manually.
 
 **Usage:** `devconcurrent show ca-root`
 
@@ -269,6 +271,8 @@ Manage the DNS server and HTTP proxy
 * `up` — Start or restart the proxy
 * `down` — Stop and remove the proxy
 * `status` — Check that every configured hostname and port is reachable
+* `trust` — Install the CA into the system and browser trust stores
+* `untrust` — Remove the CA from the system and browser trust stores
 
 
 
@@ -305,6 +309,28 @@ Check that every configured hostname and port is reachable
 * `-w`, `--workspace <WORKSPACE>` — Workspace name (only useful if its devcontainer.json diverges from the root workspace)
 * `-a`, `--all` — Check every proxy-enabled project, not just this one
 * `--json` — Print the results as JSON instead of a table
+
+
+
+## `devconcurrent proxy trust`
+
+Install the CA into the system and browser trust stores
+
+We will do our best to install our CA to your system trust store and, if possible, Firefox and Chromium's trust stores. This requires root, so you will be asked for your password via `sudo`.
+
+Note that our CA is only valid for the listed TLDs (default is only "test"). As long as these aren't real TLDs that can serve real traffic, this is pretty safe, but it's still not recommended on a production machine.
+
+**Usage:** `devconcurrent proxy trust`
+
+
+
+## `devconcurrent proxy untrust`
+
+Remove the CA from the system and browser trust stores
+
+This will also delete the CA and its key.
+
+**Usage:** `devconcurrent proxy untrust`
 
 
 

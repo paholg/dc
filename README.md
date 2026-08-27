@@ -50,3 +50,7 @@ whichever you prefer.
 </p>
 
 ---
+
+## Acknowledgements
+
+* CA trust installation is modeled after [`mkcert`](https://github.com/FiloSottile/mkcert) by Filippo Valsorda.

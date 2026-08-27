@@ -6,6 +6,36 @@ here.
 NOTE: Document the dangers of `mountGit` -- a container can write to it, which
 could result in host execution.
 
+## Trusting the CA is built in
+
+mkcert is no longer needed (this supersedes the trust instructions in the
+HTTPS section below). Two new commands do its job:
+
+* `dc proxy trust` — generates the CA if needed, then installs it into the
+  system trust store (via sudo) and, when `certutil` from the NSS tools is
+  available, into the browsers' own stores: Firefox, and Chromium on Linux.
+  Without `certutil` the browser stores are skipped with a notice naming the
+  package to install (`libnss3-tools`, `nss-tools`, `nss`, or `brew install
+  nss`, depending on the platform).
+* `dc proxy untrust` — removes the CA from all of those stores, then deletes
+  its certificate and key files; the next `dc proxy up` or `dc proxy trust`
+  generates a fresh CA. It also removes the entries a root installed with the
+  old `CAROOT=... mkcert -install` instructions left behind, so switching
+  over needs no cleanup.
+
+The `trust` row of `dc proxy status` and the TLD-change error now point at
+these commands. `dc show ca-root` still prints the CA directory for manual
+imports. On macOS 15 and later, the system may additionally ask you to
+confirm the change in a security dialog.
+
+On NixOS there is no writable system store; instead set
+
+```nix
+security.pki.certificateFiles = [ "<ca-root>/rootCA.pem" ];
+```
+
+in your system configuration, with the directory printed by `dc show ca-root`.
+
 ## Matching the container user to you
 
 `mountGit` shares one `.git` directory between the host and the container. If

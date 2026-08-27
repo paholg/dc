@@ -277,7 +277,7 @@ fn spawn_proxy_checks(proxy: &ProxyState, strays: Vec<String>) -> Gatherer<Proxy
         .options
         .values()
         .flat_map(|o| o.services.values())
-        .any(|s| s.container_port.is_some());
+        .any(|s| s.http_proxy_port.is_some());
 
     Gatherer::progressive(move |mut out| async move {
         checks::run_proxy(
@@ -384,7 +384,7 @@ fn endpoint_table(rows: &[Row]) -> Table {
 /// The host ports are always the same pair, so the only thing worth a column
 /// is where they land.
 fn fmt_port(row: &Row) -> String {
-    match row.endpoint.container_port {
+    match row.endpoint.http_proxy_port {
         None => "-".to_string(),
         Some(port) => port.to_string(),
     }
@@ -476,7 +476,7 @@ struct JsonEndpoint<'a> {
     workspace: &'a str,
     service: &'a str,
     hostname: Option<&'a str>,
-    container_port: Option<u16>,
+    http_proxy_port: Option<u16>,
     checks: &'a RowChecks,
 }
 
@@ -501,7 +501,7 @@ async fn emit_json(proxy: &Gatherer<ProxyChecks>, rows: &[Row]) -> Result<()> {
                 workspace: &row.endpoint.workspace,
                 service: &row.endpoint.service,
                 hostname: row.endpoint.hostname.as_deref(),
-                container_port: row.endpoint.container_port,
+                http_proxy_port: row.endpoint.http_proxy_port,
                 checks,
             })
             .collect(),

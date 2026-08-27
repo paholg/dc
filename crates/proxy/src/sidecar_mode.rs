@@ -1,6 +1,6 @@
 //! Sidecar mode of the proxy binary. The same image runs in this mode when
 //! invoked with the `sidecar` subcommand; the proxy creates these sidecars
-//! inside the netns of each compose service that declares a `containerPort`.
+//! inside the netns of each compose service that declares an `httpProxyPort`.
 //!
 //! The plan + optional cert/key are written into `/etc/sidecar/` by the
 //! proxy before the container starts. We read them once on boot and spawn
@@ -666,7 +666,7 @@ mod tests {
         /// the container port", so it has to be the proxy's answer rather than
         /// the hang-up the byte splice used to produce.
         #[tokio::test]
-        async fn a_dead_container_port_answers_502() {
+        async fn a_dead_http_proxy_port_answers_502() {
             let port = serve(1).await;
             let request = head(&["GET /api HTTP/1.1", "Host: app.proj.test", "Accept: */*"]);
             let mut client = send(port, &request).await;

@@ -27,7 +27,7 @@ pub(super) struct Discovery {
 
 /// One row: one service. The proxy serves each on the same fixed pair of
 /// ports, so the row covers both — https on 443 and http on 80, each reaching
-/// `container_port`.
+/// `http_proxy_port`.
 pub(super) struct Endpoint {
     pub(super) project: String,
     pub(super) workspace: String,
@@ -36,7 +36,7 @@ pub(super) struct Endpoint {
     pub(super) hostname: Option<String>,
     /// `None` for a DNS-only service: the proxy answers for its hostname but
     /// puts no listeners in front of it.
-    pub(super) container_port: Option<u16>,
+    pub(super) http_proxy_port: Option<u16>,
     /// `None` when the service has no container at all.
     pub(super) container: Option<Target>,
     /// The sidecar this service should have, if any.
@@ -68,7 +68,7 @@ pub(super) struct Sidecar {
 
 impl Endpoint {
     pub(super) fn needs_sidecar(&self) -> bool {
-        self.container_port.is_some()
+        self.http_proxy_port.is_some()
     }
 
     pub(super) fn key(&self) -> (String, String, String) {
@@ -203,7 +203,7 @@ fn row_for(
         service: service.to_string(),
         sidecar: svc.and_then(|svc| expected_sidecar(hostname.as_deref(), svc)),
         hostname,
-        container_port: svc.and_then(|s| s.container_port),
+        http_proxy_port: svc.and_then(|s| s.http_proxy_port),
         container: target,
         collides_with: None,
     }
@@ -212,7 +212,7 @@ fn row_for(
 /// The plan the proxy would build for this service, hashed the same way it
 /// stamps it on the sidecar it creates.
 fn expected_sidecar(hostname: Option<&str>, svc: &ProxyService) -> Option<Arc<ExpectedSidecar>> {
-    let port = svc.container_port?;
+    let port = svc.http_proxy_port?;
     // The proxy falls back to this shape when a template fails to render.
     let hostname = hostname?.to_string();
     let plan = SidecarPlan { hostname, port };
@@ -339,14 +339,14 @@ mod tests {
         json!({
             "enable": true,
             "services": {
-                "app": {"containerPort": 8080},
+                "app": {"httpProxyPort": 8080},
                 "db": {},
             },
         })
     }
 
     #[test]
-    fn one_row_per_service_whether_or_not_it_has_a_container_port() {
+    fn one_row_per_service_whether_or_not_it_has_an_http_proxy_port() {
         let containers = [
             container(
                 "app-cid",
@@ -375,7 +375,7 @@ mod tests {
             .map(|e| {
                 (
                     e.service.as_str(),
-                    e.container_port,
+                    e.http_proxy_port,
                     e.hostname.clone().unwrap(),
                 )
             })
@@ -390,7 +390,7 @@ mod tests {
     }
 
     #[test]
-    fn only_a_service_with_a_container_port_expects_a_sidecar() {
+    fn only_a_service_with_an_http_proxy_port_expects_a_sidecar() {
         let containers = [container(
             "app-cid",
             &[

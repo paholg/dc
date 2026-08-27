@@ -1,11 +1,11 @@
 //! Lifecycle of the per-service sidecar.
 //!
-//! One sidecar per `(workspace, service)` that declares a `containerPort`,
+//! One sidecar per `(workspace, service)` that declares an `httpProxyPort`,
 //! joined to that service's container network namespace. The sidecar runs our
 //! own `devconcurrent-proxy` image with the `sidecar` subcommand; it reads its
 //! plan from `/etc/sidecar/plan.json` (written here via the docker archive
 //! upload API) and binds ports 80 and 443 in the target's netns, both
-//! forwarding to `127.0.0.1:<containerPort>`. The leaf cert 443 terminates
+//! forwarding to `127.0.0.1:<httpProxyPort>`. The leaf cert 443 terminates
 //! with is minted from the proxy's CA and uploaded alongside the plan.
 //!
 //! Clients reach the service by connecting to that container's IP — on Linux
@@ -49,7 +49,7 @@ pub async fn create_sidecar(
     hostname: &str,
     target_cid: &str,
 ) -> Result<Option<String>> {
-    let Some(port) = svc.container_port else {
+    let Some(port) = svc.http_proxy_port else {
         return Ok(None);
     };
     let plan = SidecarPlan {

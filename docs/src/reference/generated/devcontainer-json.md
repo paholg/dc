@@ -65,7 +65,7 @@
       - [`customizations.devconcurrent.proxy.hostname`](#customizations-devconcurrent-proxy-hostname) — Handlebars template for the proxied hostname, used by every service that does not set its own.
       - [`customizations.devconcurrent.proxy.services.<name>`](#customizations-devconcurrent-proxy-services-name) — Configure proxy settings for each docker compose service.
         - [`customizations.devconcurrent.proxy.services.<name>.hostname`](#customizations-devconcurrent-proxy-services-name-hostname) — Handlebars template for this service's hostname.
-        - [`customizations.devconcurrent.proxy.services.<name>.containerPort`](#customizations-devconcurrent-proxy-services-name-containerport) — If set, devconcurrent will run an HTTP proxy on ports 80 and 443 to this port in your container, performing TLS termination on 443.
+        - [`customizations.devconcurrent.proxy.services.<name>.httpProxyPort`](#customizations-devconcurrent-proxy-services-name-httpproxyport) — If set, devconcurrent will run an HTTP proxy on ports 80 and 443 to this port in your container, performing TLS termination on 443.
     - [`customizations.devconcurrent.env.<name>`](#customizations-devconcurrent-env-name) — Define shell variables
 
 ## `dockerComposeFile` {#dockercomposefile}
@@ -542,7 +542,7 @@ project-level `hostname`.
 
 **Type**: `string`
 
-###### `customizations.devconcurrent.proxy.services.<name>.containerPort` {#customizations-devconcurrent-proxy-services-name-containerport}
+###### `customizations.devconcurrent.proxy.services.<name>.httpProxyPort` {#customizations-devconcurrent-proxy-services-name-httpproxyport}
 
 If set, devconcurrent will run an HTTP proxy on ports 80 and 443 to this port in your
 container, performing TLS termination on 443.

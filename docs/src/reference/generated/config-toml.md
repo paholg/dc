@@ -57,7 +57,7 @@ devcontainer.customizations.devconcurrent = {
   },
   proxy = {
     enable = true,
-    services.app.containerPort = 8080,
+    services.app.httpProxyPort = 8080,
   },
 }
 ```

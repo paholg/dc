@@ -529,11 +529,11 @@ pub(super) async fn run(probe: &Probe, endpoint: &Endpoint, out: &mut Publisher<
     let dns_ok = check_dns(probe, endpoint, &hostname, ip, out).await;
     check_resolver(&hostname, ip, dns_ok, probe.dns_port, out).await;
 
-    let Some(container_port) = endpoint.container_port else {
+    let Some(http_proxy_port) = endpoint.http_proxy_port else {
         // DNS-only: there's nothing to reach, and that's not a fault.
         out.update(|c| {
             c.http = Datum::Value(Check::skip());
-            c.connect = Datum::Value(Check::skip_because("no containerPort is configured"));
+            c.connect = Datum::Value(Check::skip_because("no httpProxyPort is configured"));
             c.tls = Datum::Value(Check::skip());
             c.https = Datum::Value(Check::skip());
         });
@@ -542,8 +542,8 @@ pub(super) async fn run(probe: &Probe, endpoint: &Endpoint, out: &mut Publisher<
 
     // The two paths are reported independently: https can be broken while http
     // is fine, and saying which is the point of checking both.
-    check_http(&hostname, ip, container_port, out).await;
-    check_https(probe, &hostname, ip, container_port, out).await;
+    check_http(&hostname, ip, http_proxy_port, out).await;
+    check_https(probe, &hostname, ip, http_proxy_port, out).await;
 }
 
 /// The https path: connect to 443, prove the sidecar's cert, then prove the
@@ -552,7 +552,7 @@ async fn check_https(
     probe: &Probe,
     hostname: &str,
     ip: IpAddr,
-    container_port: u16,
+    http_proxy_port: u16,
     out: &mut Publisher<RowChecks>,
 ) {
     let addr = SocketAddr::new(ip, HTTPS_PORT);
@@ -563,21 +563,21 @@ async fn check_https(
         });
         return;
     };
-    check_https_app(probe, hostname, container_port, stream, out).await;
+    check_https_app(probe, hostname, http_proxy_port, stream, out).await;
 }
 
 /// The http path: connect to 80 and see what the service answers.
 async fn check_http(
     hostname: &str,
     ip: IpAddr,
-    container_port: u16,
+    http_proxy_port: u16,
     out: &mut Publisher<RowChecks>,
 ) {
     let addr = SocketAddr::new(ip, HTTP_PORT);
     let Some(stream) = connect(addr, |c| &mut c.http, out).await else {
         return;
     };
-    check_http_app(hostname, container_port, stream, out).await;
+    check_http_app(hostname, http_proxy_port, stream, out).await;
 }
 
 /// Mark everything that wasn't reached, so no cell is left spinning.
@@ -790,7 +790,7 @@ async fn connect(
 async fn check_https_app(
     probe: &Probe,
     hostname: &str,
-    container_port: u16,
+    http_proxy_port: u16,
     stream: TcpStream,
     out: &mut Publisher<RowChecks>,
 ) {
@@ -853,7 +853,7 @@ async fn check_https_app(
         // on the container port, so it's the app that's missing, not the proxy.
         Ok(status @ (502 | 504)) => Check::fail(format!(
             "the proxy answered {status}: nothing is serving on container port {}",
-            container_port,
+            http_proxy_port,
         )),
         Ok(status) => Check::ok_with(status.to_string()),
     };
@@ -865,19 +865,19 @@ async fn check_https_app(
 /// straight through, so what comes back is the app's.
 async fn check_http_app(
     hostname: &str,
-    container_port: u16,
+    http_proxy_port: u16,
     mut stream: TcpStream,
     out: &mut Publisher<RowChecks>,
 ) {
     let check = match http_status(&mut stream, hostname).await {
         Err(e) => Check::fail(format!(
             "no HTTP response on port {HTTP_PORT}: {e}; check that container port \
-             {container_port} is serving"
+             {http_proxy_port} is serving"
         )),
         // Both ports are reverse proxies, so a container port with nothing on
         // it is the sidecar's own gateway status rather than the app's.
         Ok(status @ (502 | 504)) => Check::fail(format!(
-            "the proxy answered {status}: nothing is serving on container port {container_port}",
+            "the proxy answered {status}: nothing is serving on container port {http_proxy_port}",
         )),
         Ok(status) => Check::ok_with(status.to_string()),
     };
@@ -985,7 +985,7 @@ mod tests {
             workspace: "feature".to_string(),
             service: "app".to_string(),
             hostname: Some(plan.hostname.clone()),
-            container_port: Some(plan.port),
+            http_proxy_port: Some(plan.port),
             container: Some(Target {
                 id: "target-cid".to_string(),
                 status: ContainerStatus::Running,
@@ -1088,9 +1088,9 @@ mod tests {
 
     /// A DNS-only service has nothing in front of it to check.
     #[test]
-    fn a_service_with_no_container_port_needs_no_sidecar() {
+    fn a_service_with_no_http_proxy_port_needs_no_sidecar() {
         let mut endpoint = endpoint();
-        endpoint.container_port = None;
+        endpoint.http_proxy_port = None;
         assert_eq!(
             check_sidecar(&probe(Vec::new()), &endpoint, "target-cid").outcome,
             Outcome::Skip,
@@ -1265,7 +1265,7 @@ mod tests {
 
     #[test]
     fn skipped_checks_are_not_failures() {
-        let row = checks(Check::ok(), Check::skip_because("no containerPort"));
+        let row = checks(Check::ok(), Check::skip_because("no httpProxyPort"));
         assert!(!row.failed());
     }
 

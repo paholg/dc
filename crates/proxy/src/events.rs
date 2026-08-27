@@ -274,11 +274,11 @@ async fn adopt(
         workspace,
         service,
         %container_ip,
-        container_port = port_config.and_then(|s| s.container_port),
+        http_proxy_port = port_config.and_then(|s| s.http_proxy_port),
         "adopting service"
     );
 
-    let sidecar_id = if let Some(svc) = port_config.filter(|s| s.container_port.is_some()) {
+    let sidecar_id = if let Some(svc) = port_config.filter(|s| s.http_proxy_port.is_some()) {
         let root = workspace == project;
         let hostname = opts
             .render_hostname(project, workspace, service, root)

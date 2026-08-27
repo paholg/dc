@@ -246,23 +246,19 @@ impl DevcontainerConfig {
         let config: Self = figment
             .extract()
             .wrap_err("failed to merge devcontainer config")?;
-        config.check_proxy_container_ports()?;
+        config.check_http_proxy_ports()?;
         Ok(Some(config))
     }
 
     /// The proxy binds 80 and 443 in the service's own network namespace, so a
     /// service listening on either has already taken a port the proxy needs.
-    fn check_proxy_container_ports(&self) -> eyre::Result<()> {
+    fn check_http_proxy_ports(&self) -> eyre::Result<()> {
         for (svc_name, svc) in &self.customizations.devconcurrent.proxy.services {
-            let Some(port) = svc.container_port else {
+            let Some(port) = svc.http_proxy_port else {
                 continue;
             };
             if port == shared::HTTP_PORT || port == shared::HTTPS_PORT {
-                eyre::bail!(
-                    "service {svc_name:?}: `containerPort` cannot be {port}, because that is a \
-                     port the proxy serves the service on. Have the service listen on another \
-                     port and speak plain http; the proxy handles TLS.",
-                );
+                eyre::bail!("For service {svc_name}, httpProxyPort must not be 80 or 443");
             }
         }
         Ok(())
@@ -619,15 +615,15 @@ mod tests {
         assert!(entry.to_compose_volume(&ctx()).is_err());
     }
 
-    /// Goes through the real key spelling, so a rename of `containerPort` can't
+    /// Goes through the real key spelling, so a rename of `httpProxyPort` can't
     /// pass this silently.
-    fn config_with_container_port(port: serde_json::Value) -> DevcontainerConfig {
+    fn config_with_http_proxy_port(port: serde_json::Value) -> DevcontainerConfig {
         serde_json::from_value(serde_json::json!({
             "customizations": {
                 "devconcurrent": {
                     "proxy": {
                         "enable": true,
-                        "services": {"app": {"containerPort": port}},
+                        "services": {"app": {"httpProxyPort": port}},
                     },
                 },
             },
@@ -639,17 +635,16 @@ mod tests {
     /// them is a bind conflict inside a sidecar nobody is watching — so the
     /// error has to name the service, the port, and the way out.
     #[test]
-    fn container_port_80_or_443_is_rejected_by_name() {
+    fn http_proxy_port_80_or_443_is_rejected_by_name() {
         for port in [shared::HTTP_PORT, shared::HTTPS_PORT] {
-            let Err(err) = config_with_container_port(port.into()).check_proxy_container_ports()
-            else {
+            let Err(err) = config_with_http_proxy_port(port.into()).check_http_proxy_ports() else {
                 panic!("port {port} should be rejected");
             };
             let err = err.to_string();
 
             assert!(err.contains("\"app\""), "no service name in: {err}");
             assert!(err.contains(&port.to_string()), "no port in: {err}");
-            assert!(err.contains("containerPort"), "no key name in: {err}");
+            assert!(err.contains("httpProxyPort"), "no key name in: {err}");
             assert!(
                 err.contains("listen on another port"),
                 "no remedy in: {err}",
@@ -658,20 +653,20 @@ mod tests {
     }
 
     #[test]
-    fn an_ordinary_container_port_is_accepted() {
+    fn an_ordinary_http_proxy_port_is_accepted() {
         assert!(
-            config_with_container_port(3000.into())
-                .check_proxy_container_ports()
+            config_with_http_proxy_port(3000.into())
+                .check_http_proxy_ports()
                 .is_ok()
         );
     }
 
     /// A DNS-only service has no port to collide with.
     #[test]
-    fn a_service_without_a_container_port_is_accepted() {
+    fn a_service_without_an_http_proxy_port_is_accepted() {
         assert!(
-            config_with_container_port(serde_json::Value::Null)
-                .check_proxy_container_ports()
+            config_with_http_proxy_port(serde_json::Value::Null)
+                .check_http_proxy_ports()
                 .is_ok()
         );
     }

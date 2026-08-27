@@ -822,7 +822,7 @@
           ],
           "default": null
         },
-        "containerPort": {
+        "httpProxyPort": {
           "description": "If set, devconcurrent will run an HTTP proxy on ports 80 and 443 to this port in your\ncontainer, performing TLS termination on 443.\n\nIf this service runs a web service, put its port here.",
           "type": [
             "integer",

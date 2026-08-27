@@ -236,7 +236,7 @@ impl handlebars::HelperDef for HostnameHelper {
 }
 
 /// The fixed pair of ports the proxy binds in front of every proxied service.
-/// Both reach the service on its `containerPort`, which is why that port can
+/// Both reach the service on its `httpProxyPort`, which is why that port can
 /// be neither of these.
 pub const HTTP_PORT: u16 = 80;
 pub const HTTPS_PORT: u16 = 443;
@@ -279,7 +279,7 @@ pub struct ProxyService {
     /// container, performing TLS termination on 443.
     ///
     /// If this service runs a web service, put its port here.
-    pub container_port: Option<u16>,
+    pub http_proxy_port: Option<u16>,
 }
 
 /// A Handlebars template, compiled at deserialization time so syntax errors
@@ -486,17 +486,17 @@ mod tests {
 
     /// The key the whole config now hangs on, so pin its spelling.
     #[test]
-    fn deserializes_container_port() {
-        let svc: ProxyService = serde_json::from_str(r#"{"containerPort": 3000}"#).unwrap();
-        assert_eq!(svc.container_port, Some(3000));
+    fn deserializes_http_proxy_port() {
+        let svc: ProxyService = serde_json::from_str(r#"{"httpProxyPort": 3000}"#).unwrap();
+        assert_eq!(svc.http_proxy_port, Some(3000));
     }
 
     /// A service may exist purely so the proxy answers DNS for its hostname.
     #[test]
-    fn container_port_is_optional() {
+    fn http_proxy_port_is_optional() {
         let svc: ProxyService =
             serde_json::from_str(r#"{"hostname": "{{workspace}}.test"}"#).unwrap();
-        assert_eq!(svc.container_port, None);
+        assert_eq!(svc.http_proxy_port, None);
     }
 
     fn plan(hostname: &str, port: u16) -> SidecarPlan {

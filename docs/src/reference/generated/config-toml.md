@@ -5,6 +5,7 @@
   - [`projects.<name>.worktreeFolder`](#projects-name-worktreefolder) — The directory where devconcurrent will place worktrees.
   - [`projects.<name>.devcontainer`](#projects-name-devcontainer) — Any of the options from `devcontainer.json` (<https://containers.dev/implementors/json_reference/>), as per-user overrides.
 - [`proxy`](#proxy) — Global proxy settings.
+  - [`proxy.enable`](#proxy-enable) — Enable the devconcurrent DNS and HTTP proxy.
   - [`proxy.port`](#proxy-port) — The DNS port the proxy listens on.
   - [`proxy.caRoot`](#proxy-caroot) — Directory holding the root CA used to terminate TLS.
   - [`proxy.tlds`](#proxy-tlds) — TLDs that the proxy may mint certificates for and serve TLS on.
@@ -67,6 +68,17 @@ devcontainer.customizations.devconcurrent = {
 Global proxy settings.
 
 **Type**: `table`
+
+### `proxy.enable` {#proxy-enable}
+
+Enable the devconcurrent DNS and HTTP proxy.
+
+When false, `up` never starts the proxy and no root CA is minted,
+regardless of per-project `customizations.devconcurrent.proxy.enable`.
+
+**Type**: `boolean`
+
+**Default**: `true`
 
 ### `proxy.port` {#proxy-port}
 

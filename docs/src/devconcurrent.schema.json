@@ -19,6 +19,7 @@
     "proxy": {
       "description": "Global proxy settings.",
       "default": {
+        "enable": true,
         "port": 43770,
         "caRoot": null,
         "tlds": [
@@ -839,6 +840,11 @@
       "description": "Global user proxy settings.",
       "type": "object",
       "properties": {
+        "enable": {
+          "description": "Enable the devconcurrent DNS and HTTP proxy.\n\nWhen false, `up` never starts the proxy and no root CA is minted,\nregardless of per-project `customizations.devconcurrent.proxy.enable`.",
+          "type": "boolean",
+          "default": true
+        },
         "port": {
           "description": "The DNS port the proxy listens on.",
           "type": "integer",

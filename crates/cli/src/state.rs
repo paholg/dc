@@ -92,8 +92,8 @@ impl DevcontainerState {
         &self.config.customizations.devconcurrent
     }
 
-    pub(crate) fn proxy_enabled(&self) -> bool {
-        self.devconcurrent().proxy.enable
+    pub(crate) fn proxy_enabled(&self, config: &Config) -> bool {
+        config.proxy.enable && self.devconcurrent().proxy.enable
     }
 }
 

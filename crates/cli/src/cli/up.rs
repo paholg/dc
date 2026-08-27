@@ -131,7 +131,7 @@ impl Up {
         // If proxy is configured for this project, make sure the proxy
         // container is running before compose-up so it can react to start
         // events.
-        if devcontainer.proxy_enabled() {
+        if devcontainer.proxy_enabled(config) {
             let project = workspace.state.project_name.clone();
 
             // Catch a hostname template that renders outside proxy.tlds now,

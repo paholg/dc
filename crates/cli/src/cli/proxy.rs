@@ -68,15 +68,22 @@ impl Proxy {
         match self.command {
             ProxyCommands::Up(args) => {
                 let proxy = ProxyState::resolve(project, args.workspace).await?;
+                ensure_enabled(&proxy)?;
                 proxy_up(&proxy).await
             }
             ProxyCommands::Status(args) => {
                 let proxy = ProxyState::resolve(project, args.workspace()).await?;
+                ensure_enabled(&proxy)?;
                 status::run(&proxy, &args).await
             }
             ProxyCommands::Down => proxy_down().await,
         }
     }
+}
+
+fn ensure_enabled(proxy: &ProxyState) -> Result<()> {
+    eyre::ensure!(proxy.config.enable, "the proxy is disabled");
+    Ok(())
 }
 
 struct ProxyRunner {

@@ -99,6 +99,11 @@ impl Default for ShellGlobal {
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase", default)]
 pub(crate) struct ProxyGlobal {
+    /// Enable the devconcurrent DNS and HTTP proxy.
+    ///
+    /// When false, `up` never starts the proxy and no root CA is minted,
+    /// regardless of per-project `customizations.devconcurrent.proxy.enable`.
+    pub(crate) enable: bool,
     /// The DNS port the proxy listens on.
     pub(crate) port: u16,
     /// Directory holding the root CA used to terminate TLS.
@@ -126,6 +131,7 @@ impl ProxyGlobal {
 impl Default for ProxyGlobal {
     fn default() -> Self {
         Self {
+            enable: true,
             port: DEFAULT_PROXY_PORT,
             ca_root: None,
             tlds: vec!["test".to_string()],

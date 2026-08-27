@@ -20,6 +20,7 @@ Devconcurrent ships standard GitHub releases, is available as a brew tap, and
 has a nix flake.
 
 {{#tabs}}
+
 {{#tab name="Homebrew"}}
 
 ```bash
@@ -35,6 +36,7 @@ mise use -g github:paholg/devconcurrent
 ```
 
 {{#endtab}}
+
 {{#endtabs}}
 
 See also [GitHub Releases](https://github.com/paholg/devconcurrent/releases/),
@@ -46,6 +48,7 @@ Once installed, it's highly recommended you place the following in your shell
 config file (`.bashrc` or similar).
 
 {{#tabs}}
+
 {{#tab name="Bash"}}
 
 ```bash
@@ -69,6 +72,7 @@ source <(COMPLETE=zsh devconcurrent)
 ```
 
 {{#endtab}}
+
 {{#endtabs}}
 
 The rest of this document assumes you have run this, but if you have not,

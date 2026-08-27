@@ -5,9 +5,11 @@ exclude = [
   "docs/src/reference/generated",
   # Fragments spliced into generated pages; not standalone documents:
   "docs/snippets",
-  # TODO: Maybe there's a mdbook mode for these?
-  "docs/src/SUMMARY.md"
 ]
+
+[per-file-ignores]
+# mdbook part titles are level-1 headings:
+"docs/src/SUMMARY.md" = ["MD025"]
 
 [MD013]
 code_blocks = false

@@ -61,6 +61,10 @@ jobs:
           purge-prefixes: nix-${{ runner.os }}-cargo-
           purge-created: 0
           purge-primary-key: never
+          # GC the store before saving. Uncapped, these caches grew to
+          # 2.7/4.6 GiB compressed, blowing the 10 GB budget and getting
+          # the other nix caches evicted (full rebuilds, ~10 min).
+          gc-max-store-size: 4G
       - run: nix flake check --print-build-logs
 
   docker-crate:
@@ -149,6 +153,8 @@ jobs:
           purge-prefixes: nix-${{ runner.os }}-image-
           purge-created: 0
           purge-primary-key: never
+          # See the cargo cache above; this job's store was 5.9 GiB uncapped.
+          gc-max-store-size: 4G
       - run: nix build .#docker-service-image --print-build-logs
 
   generate-check:

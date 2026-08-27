@@ -1,0 +1,56 @@
+name: Book
+
+# Deploy the book when publishing a release (same tag pattern as release.yml;
+# we can't use the `release` event because the release is created with
+# GITHUB_TOKEN, which doesn't trigger workflows), or manually.
+on:
+  push:
+    tags:
+      - "**[0-9]+.[0-9]+.[0-9]+*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build book
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: nixbuild/nix-quick-install-action@v32
+      - uses: nix-community/cache-nix-action@v6
+        with:
+          primary-key: nix-${{ runner.os }}-docs-${{ hashFiles('flake.lock') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-docs-
+          purge: true
+          purge-prefixes: nix-${{ runner.os }}-docs-
+          purge-created: 0
+          purge-primary-key: never
+      - run: nix build .#docs --print-build-logs
+      # Copy out of the nix store so the artifact has writable, non-symlinked files.
+      - name: Stage site
+        run: |
+          mkdir -p site
+          cp -rL --no-preserve=mode,ownership result/. site/
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    name: Deploy book
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    # Never cancel a deploy that's in flight.
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

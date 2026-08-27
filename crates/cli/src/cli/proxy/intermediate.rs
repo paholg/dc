@@ -1,22 +1,8 @@
-//! Mints the short-lived, name-constrained intermediate CA the proxy runs on,
-//! from a devconcurrent-generated root.
+//! Mint the short-lived, name-constrained intermediate CA the proxy uses.
 //!
-//! The root CA lives in `proxy.caRoot` on the host — generated there on first
-//! use — and its key is read here and nowhere else. Both the root and the
-//! intermediate carry X.509 name constraints limiting them to the TLDs in
-//! `proxy.tlds`: trusting the root only extends trust for those suffixes, and
-//! a compromised proxy image cannot mint a certificate for anything outside
-//! them. An existing root must be one we generated, constrained to exactly
-//! `proxy.tlds`; anything else is an error with replacement instructions.
-//! Replacing a root silently would leave the old one trusted with no way to
-//! untrust it — `mkcert -uninstall` needs the cert file — so the user unwinds
-//! trust first, then deletes the files.
-//!
-//! The root's file names match mkcert's, so a single
-//! `CAROOT=$(devconcurrent show ca-root) mkcert -install` puts it in the
-//! system and browser trust stores. The root mkcert itself generates won't
-//! do: it carries `pathlen:0`, which forbids any intermediate beneath it, and
-//! cannot be constrained by TLDs.
+//! The root CA lives in `proxy.caRoot`, is generated on first use, and is read nowhere else. Both
+//! the root and intermediate have X.509 name constraints limiting them to the TLDs in `proxy.tlds`:
+//! trusting the root only extends trust for those suffixes.
 
 use std::path::Path;
 
@@ -39,7 +25,7 @@ const ROOT_VALIDITY: SignedDuration = SignedDuration::from_hours(10 * 365 * 24);
 
 /// How we recognize a root we generated. Anything else in `proxy.caRoot` is
 /// rejected.
-const ROOT_CN: &str = "devconcurrent root CA";
+pub(crate) const ROOT_CN: &str = "devconcurrent root CA";
 
 #[derive(Debug)]
 pub(crate) struct Intermediate {
@@ -115,7 +101,7 @@ fn load_or_create_root(dir: &Path, tlds: &[String]) -> Result<Issuer<'static, Ke
         (true, true) => {
             let cert_pem = std::fs::read_to_string(&cert_path)
                 .wrap_err_with(|| format!("read {}", cert_path.display()))?;
-            check_root(&cert_pem, dir, &cert_path, tlds)?;
+            check_root(&cert_pem, &cert_path, tlds)?;
         }
         (false, false) => create_root(dir, &cert_path, &key_path, tlds)?,
         (cert, _) => {
@@ -184,9 +170,8 @@ fn create_root(dir: &Path, cert_path: &Path, key_path: &Path, tlds: &[String]) -
 }
 
 /// Check that an existing root is ours and constrained to exactly `tlds`
-fn check_root(cert_pem: &str, dir: &Path, path: &Path, tlds: &[String]) -> Result<()> {
+fn check_root(cert_pem: &str, path: &Path, tlds: &[String]) -> Result<()> {
     let path = path.display();
-    let dir = dir.display();
 
     let (_, pem) = x509_parser::pem::parse_x509_pem(cert_pem.as_bytes())
         .map_err(|e| eyre!("parse {path}: {e}"))?;
@@ -226,9 +211,8 @@ fn check_root(cert_pem: &str, dir: &Path, path: &Path, tlds: &[String]) -> Resul
             "\
 The allowed TLDs has changed from [{old}] to [{new}], and the CA needs to be regenerated.
 
-1. Untrust the old root. Example: CAROOT=\"{dir}\" mkcert -uninstall
-2. Clear the directory {dir}
-3. Rerun this command. A fresh root will be generated and need to be re-trusted."
+1. Untrust and delete the old root: dc proxy untrust
+2. Rerun this command. A fresh root will be generated and need to be re-trusted."
         );
     }
 
@@ -438,9 +422,9 @@ mod tests {
         );
 
         // A different set: an error telling the user how to replace the root,
-        // which is left in place so `mkcert -uninstall` can still find it.
+        // which is left in place so `dc proxy untrust` can still find it.
         let err = mint(dir.path(), &["dev".to_string(), "test".to_string()]).unwrap_err();
-        assert!(err.to_string().contains("mkcert -uninstall"), "{err}");
+        assert!(err.to_string().contains("dc proxy untrust"), "{err}");
         assert_eq!(
             original,
             std::fs::read_to_string(dir.path().join(ROOT_CA_PEM)).unwrap(),

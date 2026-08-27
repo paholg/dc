@@ -390,9 +390,7 @@ fn trust_verdict(
         return Check::skip_because(format!("couldn't read the system trust store: {problem}"));
     }
     Check::fail(
-        "the CA isn't in the system trust store; run \
-         `CAROOT=$(devconcurrent show ca-root) mkcert -install` \
-         (browsers keep their own stores, which it also installs into)",
+        "the CA isn't in the system trust store; run `dc proxy trust` (if you've added it to your browser directly, feel free to ignore this)",
     )
 }
 
@@ -1170,17 +1168,12 @@ mod tests {
     }
 
     #[test]
-    fn a_ca_missing_from_the_platform_store_points_at_mkcert() {
+    fn a_ca_missing_from_the_platform_store_points_at_proxy_trust() {
         let ours = [der(b"our-ca")];
         let native = [der(b"some-public-root")];
         let check = trust_verdict(&ours, &native, None);
         assert!(check.failed());
-        assert!(
-            check
-                .detail
-                .unwrap()
-                .contains("CAROOT=$(devconcurrent show ca-root) mkcert -install")
-        );
+        assert!(check.detail.unwrap().contains("dc proxy trust"));
     }
 
     /// A store we couldn't read is not evidence of anything.

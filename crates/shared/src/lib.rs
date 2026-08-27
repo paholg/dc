@@ -30,10 +30,8 @@ pub const PROXY_CA_DIR: &str = "/etc/proxy-ca";
 pub const PROXY_CA_CERT_FILE: &str = "intermediateCA.pem";
 pub const PROXY_CA_KEY_FILE: &str = "intermediateCA-key.pem";
 
-/// Root CA file names on the host, inside the configured `proxy.caRoot`. The
-/// names match mkcert's so `CAROOT=<caRoot> mkcert -install` can install
-/// trust. Read by the CLI to sign the intermediate; never mounted into any
-/// container.
+/// Root CA file names on the host, inside the configured `proxy.caRoot`. Read
+/// by the CLI to sign the intermediate; never mounted into any container.
 pub const ROOT_CA_PEM: &str = "rootCA.pem";
 pub const ROOT_CA_KEY_PEM: &str = "rootCA-key.pem";
 

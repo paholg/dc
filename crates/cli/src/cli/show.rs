@@ -32,7 +32,8 @@ enum ShowCommands {
     Env(Env),
     /// Print the CA root directory, generating the CA if it isn't there yet
     ///
-    /// Trust the CA with `CAROOT=$(devconcurrent show ca-root) mkcert -install`.
+    /// Trust the CA with `dc proxy trust`; this command is for importing
+    /// `rootCA.pem` somewhere manually.
     CaRoot(CaRoot),
 }
 
@@ -97,8 +98,6 @@ impl CaRoot {
     fn run(self) -> eyre::Result<()> {
         let config = Config::load()?;
         let dir = config.proxy.ca_root_dir()?;
-        // Never hand out a hollow directory: `mkcert -install` on an empty
-        // CAROOT would generate mkcert's own (unusable) root there.
         crate::cli::proxy::intermediate::ensure_root(&dir, &config.proxy.tlds)?;
         println!("{}", dir.display());
         Ok(())

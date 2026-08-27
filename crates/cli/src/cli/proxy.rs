@@ -20,6 +20,7 @@ mod dns;
 pub(crate) mod intermediate;
 mod proxy_state;
 mod status;
+mod trust;
 pub(crate) use proxy_state::ProxyState;
 
 /// OCI image used by the proxy container.
@@ -52,6 +53,20 @@ enum ProxyCommands {
     /// Check that every configured hostname and port is reachable
     #[command(visible_alias = "s")]
     Status(status::StatusArgs),
+    /// Install the CA into the system and browser trust stores
+    ///
+    /// We will do our best to install our CA to your system trust store and, if possible, Firefox
+    /// and Chromium's trust stores. This requires root, so you will be asked for your password via
+    /// `sudo`.
+    ///
+    /// Note that our CA is only valid for the listed TLDs (default is only "test"). As long as
+    /// these aren't real TLDs that can serve real traffic, this is pretty safe, but it's still not
+    /// recommended on a production machine.
+    Trust(trust::Trust),
+    /// Remove the CA from the system and browser trust stores
+    ///
+    /// This will also delete the CA and its key.
+    Untrust(trust::Untrust),
 }
 
 #[derive(Debug, Args)]
@@ -77,6 +92,9 @@ impl Proxy {
                 status::run(&proxy, &args).await
             }
             ProxyCommands::Down => proxy_down().await,
+            // Like `show ca-root`, these are global: no docker, no project.
+            ProxyCommands::Trust(trust) => trust.run(),
+            ProxyCommands::Untrust(untrust) => untrust.run(),
         }
     }
 }

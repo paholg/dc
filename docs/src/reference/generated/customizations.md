@@ -70,6 +70,29 @@ project-level `hostname`.
 
 **Type**: `string`
 
+**Example:**
+
+You may want a simpler hostname for your primary service.
+
+```json,filename=devcontainer.json
+{
+  ...,
+  "customizations": {
+    "devconcurrent": {
+      "proxy": {
+        "enable": true,
+        "services": {
+          "app": {
+            "httpProxyPort": 3000,
+            "hostname": "{{workspace}.test"
+          }
+        }
+      }
+    }
+  }
+}
+```
+
 #### `proxy.services.<name>.httpProxyPort` {#proxy-services-name-httpproxyport}
 
 If set, devconcurrent will run an HTTP proxy on ports 80 and 443 to this port in your

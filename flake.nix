@@ -145,6 +145,19 @@
           );
           fmt = craneLib.cargoFmt artifacts;
           test = craneLib.cargoNextest artifacts;
+          # Dead-link check on the rendered book; catches links to pages
+          # missing from SUMMARY.md, which mdbook silently doesn't render.
+          docs-links =
+            pkgs.runCommand "docs-links"
+              {
+                nativeBuildInputs = [ pkgs.lychee ];
+                # lychee constructs its HTTP client even in offline mode.
+                SSL_CERT_FILE = "${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt";
+              } # bash
+              ''
+                lychee --offline --root-dir ${docs} '${docs}/**/*.html'
+                touch $out
+              '';
         };
         packages = {
           default = package;
@@ -166,6 +179,7 @@
               gh-markdown-preview
               jq
               just
+              lychee
               mdbook
               # Provides mdbook-tabs.
               mdbook-plugins

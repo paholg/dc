@@ -7,6 +7,18 @@
 - [Installation](./start/installation.md)
 - [Configuration](./start/configuration.md)
 
+# User Guide
+
+- [Introduction](./user/introduction.md)
+- [Workspaces](./user/workspaces.md)
+- [Devcontainers](./user/devcontainers.md)
+- [Port Forwarding](./user/port-forwarding.md)
+
+# Project Guide
+
+- [Introduction](./project/introduction.md)
+- [Devcontainer Setup](./project/devcontainer.md)
+
 # Reference
 
 - [CLI](./reference/cli.md)

@@ -3,7 +3,7 @@
 If a project uses devcontainers, but not devconcurrent, you might configure it
 here like this:
 
-```toml
+```toml,filename=config.toml
 [projects.my-app]
 path = "~/src/my-app"
 # Per-user devcontainer overrides, merged into the repo's devcontainer.json:

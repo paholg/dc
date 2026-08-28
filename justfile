@@ -68,8 +68,15 @@ check-schema:
     npx --yes --package=ajv-cli ajv compile -s docs/src/devconcurrent.schema.json \
         -c ./ajv.config.js --spec=draft7 --strict=true
 
+# Check the rendered book for dead links; catches links to pages missing from
+# SUMMARY.md, which mdbook silently doesn't render.
 [private]
-lint:
+check-links:
+    mdbook build docs
+    lychee --offline --root-dir "$PWD/docs/book" 'docs/book/**/*.html'
+
+[private]
+lint: check-links
     cargo fmt --all -- --check
     cargo clippy --all-features --all-targets --workspace -- -D warnings
     tombi lint

@@ -1,0 +1,16 @@
+[package]
+name = "winstore"
+version.workspace = true
+edition.workspace = true
+description = "The Windows user Root certificate store, driven through certutil.exe"
+publish = false
+
+[dependencies]
+eyre = "0.6.14"
+# The library doesn't need rcgen; the `winstore-e2e` binary generates its
+# test roots with it.
+rcgen = { workspace = true }
+x509-parser = { workspace = true }
+
+[lints]
+workspace = true

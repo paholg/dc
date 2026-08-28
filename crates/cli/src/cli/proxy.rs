@@ -59,6 +59,10 @@ enum ProxyCommands {
     /// and Chromium's trust stores. This requires root, so you will be asked for your password via
     /// `sudo`.
     ///
+    /// Under WSL, the CA is also installed into your Windows user certificate store (via
+    /// `certutil.exe`), so native Windows browsers trust it too; Windows will ask you to confirm
+    /// in a security dialog.
+    ///
     /// Note that our CA is only valid for the listed TLDs (default is only "test"). As long as
     /// these aren't real TLDs that can serve real traffic, this is pretty safe, but it's still not
     /// recommended on a production machine.

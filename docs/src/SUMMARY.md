@@ -18,6 +18,7 @@
   - [macOS](./user/dns/macos.md)
   - [Windows](./user/dns/windows.md)
   - [Verification](./user/dns/verification.md)
+- [HTTP](./user/http.md)
 
 # Project Guide
 

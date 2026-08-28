@@ -13,6 +13,11 @@
 - [Workspaces](./user/workspaces.md)
 - [Devcontainers](./user/devcontainers.md)
 - [Port Forwarding](./user/port-forwarding.md)
+- [DNS](./user/dns.md)
+  - [Linux](./user/dns/linux.md)
+  - [macOS](./user/dns/macos.md)
+  - [Windows](./user/dns/windows.md)
+  - [Verification](./user/dns/verification.md)
 
 # Project Guide
 

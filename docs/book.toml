@@ -11,5 +11,5 @@ src = "src"
 site-url = "/"
 git-repository-url = "https://github.com/paholg/devconcurrent"
 edit-url-template = "https://github.com/paholg/devconcurrent/edit/main/docs/{path}"
-additional-css = ["theme/tabs.css"]
-additional-js = ["theme/tabs.js"]
+additional-css = ["theme/tabs.css", "theme/filename.css"]
+additional-js = ["theme/tabs.js", "theme/filename.js"]

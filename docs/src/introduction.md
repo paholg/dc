@@ -2,6 +2,16 @@
 
 Welcome to `devconcurrent`, your new development environment manager!
 
+## Organization
+
+This document is largely divided into two sections;
+[User Guide](./user/introduction.md) for how to setup your machine and personal
+configuration and [Project Guide](./project/introduction.md) for how to
+configure a project.
+
+In both sections, we try to dive into how `devconcurrent` works a bit, so it may
+be valuable for you to skim both, even if you're only setting up one of the two.
+
 ## Value Proposition
 
 With git worktrees, you can work on multiple branches of a project in different

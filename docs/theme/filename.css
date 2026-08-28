@@ -1,0 +1,10 @@
+/* Header bar naming the file a code block shows; inserted by filename.js
+ * from a `filename=` fence annotation. Sits as the first child of the
+ * <pre>, flush above the <code> block. */
+.code-filename {
+    font-family: var(--mono-font);
+    font-size: var(--code-font-size);
+    background-color: var(--table-header-bg);
+    border-bottom: 1px solid var(--table-border-color);
+    padding: 0.4rem 1rem;
+}

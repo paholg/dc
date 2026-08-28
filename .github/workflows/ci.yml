@@ -32,6 +32,7 @@ jobs:
       - generate-check
       - schema
       - trust-e2e
+      - windows-store-e2e
     steps:
       - name: Check if all jobs succeeded
         uses: re-actors/alls-green@release/v1
@@ -136,6 +137,23 @@ jobs:
         run: >-
           docker run --rm -v "$PWD:/src" -w /src archlinux:base
           bash -c 'pacman -Sy --noconfirm --quiet nss openssl && bash .github/trust-e2e.sh'
+
+  # The Windows-store half of WSL trust support. Hosted runners can't run
+  # WSL2 (no nested virtualization), so this runs the `winstore` crate — the
+  # certutil.exe driver `dc proxy trust` uses from WSL — natively on Windows
+  # against a real user Root store; `wslpath` and interop discovery stay
+  # manually tested.
+  windows-store-e2e:
+    name: Windows store e2e
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+      - run: cargo run -p winstore --bin winstore-e2e
 
   # Build-only; publishing happens on tags, in release-image.yml.
   docker-image:

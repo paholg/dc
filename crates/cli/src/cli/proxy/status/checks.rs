@@ -32,7 +32,7 @@ use tokio_rustls::TlsConnector;
 use super::ProxyChecks;
 use super::endpoints::{Endpoint, Sidecar};
 use crate::ansi::{GRAY, GREEN, RED, RESET};
-use crate::cli::proxy::{PROXY_IMAGE, dns, intermediate};
+use crate::cli::proxy::{PROXY_IMAGE, dns, intermediate, trust};
 use crate::table::Datum;
 use crate::table::gatherer::Publisher;
 
@@ -371,7 +371,29 @@ fn check_trust(ca_root: &Path, wants_tls: bool) -> Check {
         .first()
         .map(|e| e.to_string())
         .filter(|_| !native.errors.is_empty());
-    trust_verdict(&ours, &native.certs, problem)
+    let check = trust_verdict(&ours, &native.certs, problem);
+
+    // Under WSL, native browsers read the Windows store, not this distro's —
+    // an Ok from the Linux side is only half the answer. (A fail already
+    // points at `dc proxy trust`, which fills both stores.)
+    if check.outcome != Outcome::Ok || !trust::wsl() {
+        return check;
+    }
+    match trust::windows::user_root_store() {
+        Err(e) => Check::skip_because(format!(
+            "in the system trust store, but the Windows store couldn't be read: {e:#}"
+        )),
+        Ok(dump)
+            if ours
+                .iter()
+                .any(|cert| trust::windows::store_contains(&dump, cert.as_ref())) =>
+        {
+            Check::ok().with_detail("in the system and Windows trust stores")
+        }
+        Ok(_) => Check::fail(
+            "the CA isn't in the Windows certificate store that native browsers read; run `dc proxy trust`",
+        ),
+    }
 }
 
 fn trust_verdict(

@@ -1,5 +1,6 @@
 //! The platform trust store: the macOS System keychain, or a Linux distro's
-//! CA anchor directory plus the command that rebuilds the bundle from it.
+//! CA anchor directory plus the command that rebuilds the bundle from it —
+//! and, under WSL, additionally the Windows store that native browsers read.
 
 use eyre::{Result, bail};
 
@@ -9,7 +10,13 @@ pub(super) fn install(ca: &Ca) -> Result<()> {
     if cfg!(target_os = "macos") {
         macos::install(ca)
     } else if cfg!(target_os = "linux") {
-        linux::install(ca)
+        // Both stores matter under WSL: the distro's for tools inside it,
+        // Windows' for the browsers outside it.
+        linux::install(ca)?;
+        if wsl() {
+            windows::install(ca)?;
+        }
+        Ok(())
     } else {
         bail!("only the Linux and macOS system trust stores are supported")
     }
@@ -19,9 +26,42 @@ pub(super) fn uninstall(ca: &Ca) -> Result<()> {
     if cfg!(target_os = "macos") {
         macos::uninstall(ca)
     } else if cfg!(target_os = "linux") {
-        linux::uninstall(ca)
+        linux::uninstall(ca)?;
+        if wsl() {
+            windows::uninstall()?;
+        }
+        Ok(())
     } else {
         bail!("only the Linux and macOS system trust stores are supported")
+    }
+}
+
+/// Whether this Linux is a WSL distro, with Windows itself alongside.
+pub(crate) fn wsl() -> bool {
+    cfg!(target_os = "linux")
+        && std::fs::read_to_string("/proc/version").is_ok_and(|v| is_wsl_version(&v))
+}
+
+fn is_wsl_version(version: &str) -> bool {
+    version.to_ascii_lowercase().contains("microsoft")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn wsl_is_recognized_by_its_kernel_version() {
+        assert!(is_wsl_version(
+            "Linux version 5.15.167.4-microsoft-standard-WSL2 (root@f9c826d3017f) ..."
+        ));
+        // WSL1 spells it with a capital M.
+        assert!(is_wsl_version(
+            "Linux version 4.4.0-19041-Microsoft (Microsoft@Microsoft.com) ..."
+        ));
+        assert!(!is_wsl_version(
+            "Linux version 6.12.4-arch1-1 (linux@archlinux) ..."
+        ));
     }
 }
 
@@ -197,5 +237,99 @@ mod macos {
             .args(["find-certificate", "-c", ROOT_CN, SYSTEM_KEYCHAIN])
             .output()
             .is_ok_and(|out| out.status.success())
+    }
+}
+
+pub(crate) mod windows {
+    //! The Windows current-user Root store, reached from inside WSL: Windows
+    //! binaries are callable here, so `certutil.exe` can install the CA where
+    //! native browsers (Chrome, Edge) look. No elevation needed — Windows
+    //! asks the user to confirm in a security dialog instead.
+    //!
+    //! The certutil driving lives in the `winstore` crate, which also
+    //! compiles on Windows so CI can exercise it against a real store; this
+    //! module adds what's WSL-specific — finding certutil.exe across interop
+    //! and translating the CA's path.
+
+    use std::path::{Path, PathBuf};
+    use std::process::Command;
+
+    use color_eyre::owo_colors::OwoColorize;
+    use eyre::{Result, bail, eyre};
+    pub(crate) use winstore::store_contains;
+
+    use super::super::Ca;
+    use crate::cli::proxy::intermediate::ROOT_CN;
+
+    pub(super) fn install(ca: &Ca) -> Result<()> {
+        let Some(certutil) = find_certutil() else {
+            bail!(
+                "\
+certutil.exe can't be found, so the CA can't reach the Windows certificate store that native
+browsers read. Enable WSL interop, or install it from Windows yourself:
+`certutil -user -addstore Root <path to rootCA.pem>`"
+            );
+        };
+        let path = windows_path(&ca.pem_path)?;
+        tracing::info!(
+            "Windows will ask you to confirm adding the CA to your user's certificate store"
+        );
+        winstore::install(&certutil, winstore::Scope::User, &path)?;
+        tracing::info!("{} installed in the Windows certificate store", "✓".green());
+        Ok(())
+    }
+
+    pub(super) fn uninstall() -> Result<()> {
+        let Some(certutil) = find_certutil() else {
+            bail!(
+                "\
+certutil.exe can't be found, so the CA can't be removed from the Windows certificate store.
+Enable WSL interop, or remove it from Windows yourself:
+`certutil -user -delstore Root \"{ROOT_CN}\"`"
+            );
+        };
+        if winstore::uninstall(&certutil, winstore::Scope::User, ROOT_CN)? == 0 {
+            tracing::info!("not in the Windows certificate store; nothing to remove");
+        } else {
+            tracing::info!("{} removed from the Windows certificate store", "✓".green());
+        }
+        Ok(())
+    }
+
+    /// The certutil dump of every devconcurrent root in the user's Root
+    /// store; see [`winstore::root_store`].
+    pub(crate) fn user_root_store() -> Result<String> {
+        let certutil = find_certutil()
+            .ok_or_else(|| eyre!("certutil.exe can't be found (is WSL interop enabled?)"))?;
+        winstore::root_store(&certutil, winstore::Scope::User, ROOT_CN)
+    }
+
+    /// Windows' own certificate tool (unrelated to the NSS `certutil`).
+    /// Interop puts the Windows PATH on ours by default; the fixed path
+    /// covers setups with that appending turned off.
+    fn find_certutil() -> Option<PathBuf> {
+        if let Ok(found) = which::which("certutil.exe") {
+            return Some(found);
+        }
+        let fixed = Path::new("/mnt/c/Windows/System32/certutil.exe");
+        fixed.is_file().then(|| fixed.to_path_buf())
+    }
+
+    /// How Windows addresses `path`: the `\\wsl.localhost\...` UNC form from
+    /// `wslpath`, which every WSL distro ships and certutil accepts.
+    fn windows_path(path: &Path) -> Result<String> {
+        let out = Command::new("wslpath")
+            .arg("-w")
+            .arg(path)
+            .output()
+            .map_err(|e| eyre!("run wslpath: {e}"))?;
+        if !out.status.success() {
+            bail!(
+                "`wslpath -w {}` failed: {}",
+                path.display(),
+                String::from_utf8_lossy(&out.stderr).trim(),
+            );
+        }
+        Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
     }
 }

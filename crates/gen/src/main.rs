@@ -334,7 +334,9 @@ fn document(
         body.push_str(&format!("**Default**: `{}`\n\n", scalar(default, format)?));
     }
 
-    let snippet_path = snippets.join(format!("{display}.md"));
+    // `<`/`>` (from map keys like `projects.<name>`) are illegal in Windows filenames, so we spell
+    // them with underscores instead.
+    let snippet_path = snippets.join(format!("{}.md", display.replace(['<', '>'], "_")));
     if snippet_path.is_file() {
         used_snippets.insert(snippet_path.clone());
         let snippet = fs::read_to_string(&snippet_path)?;

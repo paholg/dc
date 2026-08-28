@@ -6,6 +6,8 @@ mod nss;
 mod sudo;
 mod system;
 
+pub(crate) use system::{windows, wsl};
+
 use std::path::{Path, PathBuf};
 
 use clap::Args;

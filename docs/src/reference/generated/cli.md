@@ -65,7 +65,7 @@ Bring up a workspace, creating it if it does not exist
 
 * `-f`, `--forward` — Foward configured `forwardPorts` once up
 * `-d`, `--detach` — Detach worktree rather than creating a branch
-* `-b`, `--branch <BRANCH>` — Specify a branch instead of using the worktree name
+* `-b`, `--branch <BRANCH>` — Specify an explicit branch
 * `-g`, `--go` — Navigate to the directory after creating (if using via shell wrapper)
 * `-x`, `--exec <EXEC>` — Exec once up with the given command [default: the container user's shell]
 

@@ -37,9 +37,25 @@ options.
 
 Create a new workspace. Use `-g/--go` to also go to it.
 
-When a workspace is created, it uses a branch of the same name by default. If
-that branch does not exist, it is cut from the root project. Use `-b/--branch`
-to use a different branch name or `-d/--detach` for no branch.
+When a workspace is created, it checks out a branch named by the `worktree.branch`
+template in your `config.toml`, which defaults to the workspace name. If that
+branch does not exist, it is cut from the root project. Use `-b/--branch` to use
+a different branch name or `-d/--detach` for no branch.
+
+To prefix your branches, set the template globally or per project:
+
+```toml,filename=config.toml
+[worktree]
+branch = "plg/{{ workspace }}"
+
+[projects.my-app]
+path = "~/src/my-app"
+branch = "{{ project }}/{{ workspace }}"
+```
+
+With this, `dc up foo` creates worktree `foo` on branch `plg/foo`, or
+`my-app/foo` in `my-app`. Templates get `project` and `workspace`; see the
+[config.toml reference](../reference/config-toml.md).
 
 ### `dc go NAME`
 

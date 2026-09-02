@@ -42,6 +42,17 @@
           "$ref": "#/definitions/ShellGlobal"
         }
       ]
+    },
+    "worktree": {
+      "description": "Worktree settings.",
+      "default": {
+        "branch": null
+      },
+      "allOf": [
+        {
+          "$ref": "#/definitions/WorktreeGlobal"
+        }
+      ]
     }
   },
   "x-tombi-toml-version": "v1.1.0",
@@ -62,6 +73,18 @@
           ],
           "default": null
         },
+        "branch": {
+          "description": "Template for the default branch name for `up` on a new workspace, overriding `worktree.branch`",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/HandlebarsTemplate"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "devcontainer": {
           "description": "Any of the options from `devcontainer.json` (<https://containers.dev/implementors/json_reference/>),\nas per-user overrides. These are merged with the project's `devcontainer.json`, with arrays\nconcatenated and this file winning conflicts.",
           "anyOf": [
@@ -77,6 +100,10 @@
       "required": [
         "path"
       ]
+    },
+    "HandlebarsTemplate": {
+      "description": "A Handlebars template. Hostname templates get `root` (bool), `project`, `workspace` and `service`; `env` templates get `root`, `project`, `workspace` and the `hostname` helper; branch templates get `project` and `workspace`.",
+      "type": "string"
     },
     "DevcontainerConfig": {
       "description": "Devcontainer config from devcontainer.json.",
@@ -804,10 +831,6 @@
         }
       }
     },
-    "HandlebarsTemplate": {
-      "description": "A Handlebars template. Hostname templates get `root` (bool), `project`, `workspace` and `service`; `env` templates get `root`, `project`, `workspace` and the `hostname` helper.",
-      "type": "string"
-    },
     "ProxyService": {
       "type": "object",
       "properties": {
@@ -881,6 +904,24 @@
           "description": "Register a prompt hook to auto-set the variables from `customizations.devconcurrent.env`\nbased on your current working directory.",
           "type": "boolean",
           "default": true
+        }
+      }
+    },
+    "WorktreeGlobal": {
+      "description": "Global worktree settings.",
+      "type": "object",
+      "properties": {
+        "branch": {
+          "description": "Template for the default branch name for `up` on a new workspace",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/HandlebarsTemplate"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": "`\"{{ workspace }}\"`"
         }
       }
     }

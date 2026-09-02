@@ -4,6 +4,7 @@ use eyre::{WrapErr, eyre};
 use indexmap::IndexMap;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use shared::Template;
 
 use crate::devcontainer::DevcontainerConfig;
 use crate::helpers::{deserialize_shell_path, deserialize_shell_path_opt, validate_name};
@@ -77,6 +78,18 @@ pub(crate) struct Config {
     /// Shell-integration settings.
     #[serde(default)]
     pub(crate) shell: ShellGlobal,
+    /// Worktree settings.
+    #[serde(default)]
+    pub(crate) worktree: WorktreeGlobal,
+}
+
+/// Global worktree settings.
+#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase", default)]
+pub(crate) struct WorktreeGlobal {
+    /// Template for the default branch name for `up` on a new workspace
+    #[schemars(extend("default" = "`\"{{ workspace }}\"`"))]
+    pub(crate) branch: Option<Template>,
 }
 
 /// Global shell-integration settings, applied when you source
@@ -151,6 +164,9 @@ pub(crate) struct Project {
     /// devcontainer, but it's available here for projects that don't use devcontainers.
     #[serde(default, deserialize_with = "deserialize_shell_path_opt")]
     pub(crate) worktree_folder: Option<PathBuf>,
+    /// Template for the default branch name for `up` on a new workspace, overriding `worktree.branch`
+    #[serde(default)]
+    pub(crate) branch: Option<Template>,
     /// Any of the options from `devcontainer.json` (<https://containers.dev/implementors/json_reference/>),
     /// as per-user overrides. These are merged with the project's `devcontainer.json`, with arrays
     /// concatenated and this file winning conflicts.
@@ -172,6 +188,11 @@ impl Config {
             .wrap_err_with(|| format!("failed to parse {}", path.display()))?;
         serde_path_to_error::deserialize(de)
             .wrap_err_with(|| format!("failed to parse {}", path.display()))
+    }
+
+    /// The branch template for `project`: its own, or the global one.
+    pub(crate) fn branch_template<'a>(&'a self, project: &'a Project) -> Option<&'a Template> {
+        project.branch.as_ref().or(self.worktree.branch.as_ref())
     }
 
     pub(crate) fn project(
@@ -278,5 +299,38 @@ mod tests {
             let got: Vec<&str> = cfg.projects.keys().map(ProjectName::as_str).collect();
             assert_eq!(got, expected, "project order changed on iteration {i}");
         }
+    }
+
+    #[test]
+    fn project_branch_template_overrides_the_global_one() {
+        let toml = r#"
+[worktree]
+branch = "plg/{{workspace}}"
+
+[projects.a]
+path = "/tmp/a"
+
+[projects.b]
+path = "/tmp/b"
+branch = "{{project}}/{{workspace}}"
+"#;
+        let mut file = tempfile::Builder::new().suffix(".toml").tempfile().unwrap();
+        file.write_all(toml.as_bytes()).unwrap();
+        let cfg = Config::load_from_path(file.path()).unwrap();
+
+        let template = |name: &str| {
+            cfg.branch_template(&cfg.projects[&ProjectName::new(name.to_string()).unwrap()])
+                .map(Template::source)
+        };
+        assert_eq!(template("a"), Some("plg/{{workspace}}"));
+        assert_eq!(template("b"), Some("{{project}}/{{workspace}}"));
+    }
+
+    #[test]
+    fn branch_template_syntax_errors_fail_at_load() {
+        let toml = "[worktree]\nbranch = \"{{workspace\"\n";
+        let mut file = tempfile::Builder::new().suffix(".toml").tempfile().unwrap();
+        file.write_all(toml.as_bytes()).unwrap();
+        let _ = Config::load_from_path(file.path()).expect_err("unclosed template");
     }
 }

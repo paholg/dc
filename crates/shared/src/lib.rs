@@ -51,6 +51,29 @@ pub const ENV_CA_DIR: &str = "DEVCONCURRENT_PROXY_CA_DIR";
 /// Default Handlebars template for proxied hostnames.
 pub const DEFAULT_HOSTNAME_TEMPLATE: &str = "{{workspace}}.{{service}}.test";
 
+/// Default Handlebars template for the branch a new worktree checks out.
+pub const DEFAULT_BRANCH_TEMPLATE: &str = "{{workspace}}";
+
+/// Render the branch name for a new worktree.
+///
+/// `project` and `workspace` are available as plain variables. Strict mode:
+/// a typo would otherwise silently produce a branch like `plg/`.
+pub fn render_branch(
+    template: &Template,
+    project: &str,
+    workspace: &str,
+) -> Result<String, handlebars::RenderError> {
+    #[derive(serde::Serialize)]
+    struct Ctx<'a> {
+        project: &'a str,
+        workspace: &'a str,
+    }
+
+    let mut hbs = handlebars::Handlebars::new();
+    hbs.set_strict_mode(true);
+    hbs.render_template(template.source(), &Ctx { project, workspace })
+}
+
 /// Build a docker container or volume name from a fixed `prefix` and the
 /// identity `parts` it belongs to.
 ///
@@ -301,6 +324,13 @@ impl Template {
         let compiled = handlebars::Template::compile(&source)?;
         Ok(Self { source, compiled })
     }
+
+    /// [`DEFAULT_BRANCH_TEMPLATE`], compiled.
+    #[must_use]
+    pub fn default_branch() -> Self {
+        Self::compile(DEFAULT_BRANCH_TEMPLATE.to_string())
+            .expect("default branch template is a valid Handlebars template")
+    }
 }
 
 impl Default for Template {
@@ -342,7 +372,8 @@ impl JsonSchema for Template {
             "description":
                 "A Handlebars template. Hostname templates get `root` (bool), \
                 `project`, `workspace` and `service`; `env` templates get \
-                `root`, `project`, `workspace` and the `hostname` helper.",
+                `root`, `project`, `workspace` and the `hostname` helper; \
+                branch templates get `project` and `workspace`.",
         })
     }
 }
@@ -468,6 +499,20 @@ mod tests {
             .render_env_value("proj", "feature", false, &template("{{postgres}}"))
             .expect_err("strict mode");
         assert!(err.to_string().contains("postgres"), "got: {err}");
+    }
+
+    #[test]
+    fn branch_templates_see_the_project_and_workspace() {
+        let branch = render_branch(&template("{{project}}/{{workspace}}"), "proj", "feature")
+            .expect("renders");
+        assert_eq!(branch, "proj/feature");
+    }
+
+    #[test]
+    fn branch_templates_reject_unknown_variables() {
+        let err = render_branch(&template("{{user}}/{{workspace}}"), "proj", "feature")
+            .expect_err("strict mode");
+        assert!(err.to_string().contains("user"), "got: {err}");
     }
 
     #[test]

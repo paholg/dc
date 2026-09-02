@@ -2,17 +2,41 @@ use std::path::{Path, PathBuf};
 use std::process::Output;
 
 use eyre::WrapErr;
+use shared::Template;
 use tokio::process::Command;
 
 use crate::helpers::validate_name;
 use crate::run::run_cmd;
 use crate::workspace::Workspace;
 
-pub(crate) async fn create(
-    workspace: &Workspace<'_>,
-    detach: bool,
-    branch: Option<&str>,
-) -> eyre::Result<()> {
+/// What a new worktree checks out
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Checkout<'a> {
+    /// A detached HEAD at the root's commit.
+    Detach,
+    /// This branch, created from the root's HEAD if it does not exist.
+    Branch(&'a str),
+}
+
+/// The branch a new workspace checks out.
+pub(crate) fn resolve_branch(
+    explicit_branch: Option<&str>,
+    template: Option<&Template>,
+    project: &str,
+    workspace: &str,
+) -> eyre::Result<String> {
+    if let Some(branch) = explicit_branch {
+        return Ok(branch.to_string());
+    }
+
+    let default = Template::default_branch();
+    let template = template.unwrap_or(&default);
+
+    shared::render_branch(template, project, workspace)
+        .wrap_err_with(|| format!("rendering branch template {:?}", template.source()))
+}
+
+pub(crate) async fn create(workspace: &Workspace<'_>, checkout: Checkout<'_>) -> eyre::Result<()> {
     validate_name(&workspace.name).map_err(|e| eyre::eyre!("invalid workspace name: {e}"))?;
 
     let root_path = &workspace.state.project.path;
@@ -31,13 +55,20 @@ pub(crate) async fn create(
         }
     } else {
         let mut args = vec!["git", "worktree", "add", &worktree_path_str];
-        if detach {
-            args.push("--detach");
-        }
-
-        if let Some(b) = branch {
-            args.push("-b");
-            args.push(b);
+        match checkout {
+            Checkout::Detach => args.push("--detach"),
+            Checkout::Branch(branch) => {
+                // `-b` refuses an existing branch; without it, `git worktree
+                // add` would derive the branch from the path instead.
+                let exists = repo
+                    .try_find_reference(&format!("refs/heads/{branch}"))
+                    .wrap_err_with(|| format!("looking up branch {branch}"))?
+                    .is_some();
+                if !exists {
+                    args.push("-b");
+                }
+                args.push(branch);
+            }
         }
 
         workspace.state.ensure_project_working_dir()?;
@@ -112,4 +143,37 @@ pub(crate) async fn list(repo_path: &Path) -> eyre::Result<Vec<PathBuf>> {
 pub(crate) fn list_sync(repo_path: &Path) -> eyre::Result<Vec<PathBuf>> {
     let out = worktree_list_sync(repo_path)?;
     process_list(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn template(source: &str) -> Template {
+        serde_json::from_str::<Template>(&format!("{source:?}")).expect("valid template")
+    }
+
+    #[test]
+    fn explicit_branch_wins() {
+        let branch = resolve_branch(
+            Some("other"),
+            Some(&template("plg/{{workspace}}")),
+            "proj",
+            "foo",
+        )
+        .unwrap();
+        assert_eq!(branch, "other");
+    }
+
+    #[test]
+    fn template_renders_the_workspace() {
+        let branch =
+            resolve_branch(None, Some(&template("plg/{{workspace}}")), "proj", "foo").unwrap();
+        assert_eq!(branch, "plg/foo");
+    }
+
+    #[test]
+    fn defaults_to_the_workspace_name() {
+        assert_eq!(resolve_branch(None, None, "proj", "foo").unwrap(), "foo");
+    }
 }

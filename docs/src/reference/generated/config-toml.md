@@ -3,6 +3,7 @@
 - [`projects.<name>`](#projects-name) — Configured projects by name.
   - [`projects.<name>.path`](#projects-name-path) — The project location on your host.
   - [`projects.<name>.worktreeFolder`](#projects-name-worktreefolder) — The directory where devconcurrent will place worktrees.
+  - [`projects.<name>.branch`](#projects-name-branch) — Template for the default branch name for `up` on a new workspace, overriding `worktree.branch`
   - [`projects.<name>.devcontainer`](#projects-name-devcontainer) — Any of the options from `devcontainer.json` (<https://containers.dev/implementors/json_reference/>), as per-user overrides.
 - [`proxy`](#proxy) — Global proxy settings.
   - [`proxy.enable`](#proxy-enable) — Enable the devconcurrent DNS and HTTP proxy.
@@ -11,6 +12,8 @@
   - [`proxy.tlds`](#proxy-tlds) — TLDs that the proxy may mint certificates for and serve TLS on.
 - [`shell`](#shell) — Shell-integration settings.
   - [`shell.exportEnv`](#shell-exportenv) — Register a prompt hook to auto-set the variables from `customizations.devconcurrent.env` based on your current working directory.
+- [`worktree`](#worktree) — Worktree settings.
+  - [`worktree.branch`](#worktree-branch) — Template for the default branch name for `up` on a new workspace
 
 ## `projects.<name>` {#projects-name}
 
@@ -31,6 +34,12 @@ The project location on your host.
 The directory where devconcurrent will place worktrees. Defaults to
 `workspaces/<project>` under the platform data directory. This is also settable in the
 devcontainer, but it's available here for projects that don't use devcontainers.
+
+**Type**: `string`
+
+### `projects.<name>.branch` {#projects-name-branch}
+
+Template for the default branch name for `up` on a new workspace, overriding `worktree.branch`
 
 **Type**: `string`
 
@@ -120,3 +129,25 @@ based on your current working directory.
 **Type**: `boolean`
 
 **Default**: `true`
+
+## `worktree` {#worktree}
+
+Worktree settings.
+
+**Type**: `table`
+
+### `worktree.branch` {#worktree-branch}
+
+Template for the default branch name for `up` on a new workspace
+
+**Type**: `string`
+
+**Default**: `'`"{{ workspace }}"`'`
+
+**Example:**
+
+```toml,filename=config.toml
+[worktree]
+# `dc up foo` checks out `plg/foo`.
+branch = "plg/{{ workspace }}"
+```

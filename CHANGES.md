@@ -6,6 +6,23 @@ here.
 NOTE: Document the dangers of `mountGit` -- a container can write to it, which
 could result in host execution.
 
+## Branch name templates
+
+`dc up NAME` used to always check out branch `NAME`. The branch is now rendered
+from a Handlebars template with `project` and `workspace` available, set
+globally as `worktree.branch` or per project as `projects.<name>.branch` in
+`config.toml`. The default is `"{{workspace}}"`, so nothing changes unless you
+set one:
+
+```toml
+[worktree]
+branch = "plg/{{ workspace }}"
+```
+
+`-b/--branch` and `-d/--detach` still override it. As with the default, an
+existing branch is checked out rather than created; previously `--branch` with
+an existing branch failed.
+
 ## Trusting the CA is built in
 
 mkcert is no longer needed (this supersedes the trust instructions in the

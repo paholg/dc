@@ -35,7 +35,7 @@ pub(crate) struct Up {
     #[arg(short, long)]
     detach: bool,
 
-    /// Specify a branch instead of using the worktree name
+    /// Specify an explicit branch
     #[arg(short, long)]
     branch: Option<String>,
 
@@ -84,7 +84,18 @@ impl Up {
 
         let brought_up: eyre::Result<()> = async {
             if !workspace.is_root {
-                worktree::create(&workspace, self.detach, self.branch.as_deref()).await?;
+                let branch = worktree::resolve_branch(
+                    self.branch.as_deref(),
+                    config.branch_template(state.project),
+                    state.project_name.as_str(),
+                    &workspace.name,
+                )?;
+                let checkout = if self.detach {
+                    worktree::Checkout::Detach
+                } else {
+                    worktree::Checkout::Branch(&branch)
+                };
+                worktree::create(&workspace, checkout).await?;
             }
 
             if state.has_devcontainer() {

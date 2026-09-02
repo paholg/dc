@@ -1005,7 +1005,7 @@ dependencies = [
 
 [[package]]
 name = "devconcurrent"
-version = "0.0.29"
+version = "0.0.30"
 dependencies = [
  "clap",
  "clap_complete",
@@ -1058,7 +1058,7 @@ dependencies = [
 
 [[package]]
 name = "devconcurrent-proxy"
-version = "0.0.29"
+version = "0.0.30"
 dependencies = [
  "async-trait",
  "axum",
@@ -1153,7 +1153,7 @@ dependencies = [
 
 [[package]]
 name = "docker"
-version = "0.0.29"
+version = "0.0.30"
 dependencies = [
  "base64 0.23.1",
  "bon",
@@ -1465,7 +1465,7 @@ dependencies = [
 
 [[package]]
 name = "gen"
-version = "0.0.29"
+version = "0.0.30"
 dependencies = [
  "clap-markdown",
  "devconcurrent",
@@ -4253,7 +4253,7 @@ dependencies = [
 
 [[package]]
 name = "shared"
-version = "0.0.29"
+version = "0.0.30"
 dependencies = [
  "handlebars",
  "http",
@@ -5582,7 +5582,7 @@ dependencies = [
 
 [[package]]
 name = "winstore"
-version = "0.0.29"
+version = "0.0.30"
 dependencies = [
  "eyre",
  "rcgen",
